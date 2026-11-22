@@ -2,6 +2,7 @@
 
 A domain-specialised small language model (SLM) and SaaS product for media agencies and advertisers. It covers the campaign lifecycle from brief to media plan to creative to launch QA to optimisation to reporting.
 
+- **Combined release plan (M1 + M2 together, ~14–16 weeks):** [docs/COMBINED_RELEASE_PLAN.md](docs/COMBINED_RELEASE_PLAN.md): parallel workstreams, gates, and what replaces the pilot.
 - **Implementation guide for the AI coding agent:** [docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md): Release 1.0, Phases 0–12, from pilot (M1) to commercial launch (M2), with checkpoints.
 - **Business readiness drafts (run in parallel, sign-off required for launch):**
   - [docs/business/GOVERNANCE_AND_PRICING.md](docs/business/GOVERNANCE_AND_PRICING.md): owners (RACI), decision log, budget, pricing model

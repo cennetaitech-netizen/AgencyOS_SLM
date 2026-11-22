@@ -7,6 +7,8 @@
 > - **M1, Pilot (Phases 0–8):** read-only chat, prepaid wallet, free trial, shadow billing, 5 pilot orgs. *Not sold.*
 > - **M2, Commercial launch (Phases 9–12):** chat actions with confirmation, subscription plans with caps/overage/monthly invoicing, fine-tuned media-campaign SLM, launch hardening. **Sold only after M2's go/no-go.**
 > - **Business readiness** runs in parallel. Drafts are in [`business/`](business/), and M2 can't launch until they're signed off.
+>
+> **Execution mode: COMBINED (M1 + M2 as one release).** Follow [COMBINED_RELEASE_PLAN.md](COMBINED_RELEASE_PLAN.md). Phases are grouped into parallel workstreams after a contract-first step (weeks 1–2), and the per-phase checkpoints are replaced by gates G1–G5. Where that plan differs from this guide (beta instead of pilot, accelerated billing cycles, launch-safety defaults, launch not dependent on fine-tuning), **the combined plan takes precedence**. Every phase's tasks, tests and rules in this guide still apply.
 > **Background docs (read for context; this guide takes precedence where they differ):** `LEAN_MVP.md`, `CHAT_ENGINE_SLM_PLAN.md`, `TOKEN_CAPS_AND_INVOICING.md`, `BUILD_READINESS.md`.
 
 ---
