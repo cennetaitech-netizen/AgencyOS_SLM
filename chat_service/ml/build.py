@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 
 from chat_service.config import Settings
+from chat_service.crypto import FieldCipher
 from chat_service.db import create_engine
 from chat_service.engine.agent import load_prompt
 from chat_service.llm.client import OpenAICompatibleClient
@@ -47,7 +48,9 @@ def main() -> None:
     async def go():
         db = create_engine(args.database_url)
         try:
-            records, pairs, report = await export_records(db, template, tools, eval_questions, corrections)
+            records, pairs, report = await export_records(
+                db, template, tools, eval_questions, corrections, cipher=FieldCipher(settings.data_encryption_keys)
+            )
         finally:
             await db.dispose()
         synth_report = None

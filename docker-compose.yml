@@ -1,0 +1,38 @@
+# Local full stack: Postgres, Redis (no persistence), migrations, API, jobs and a stand-in model host.
+# docker compose up --build    → API on http://localhost:8090 (dev auth), demo widget via `npm run dev` in widget/
+services:
+  postgres:
+    image: postgres:16
+    environment: {POSTGRES_USER: chat, POSTGRES_PASSWORD: chat, POSTGRES_DB: chat}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U chat"], interval: 5s, retries: 10}
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]  # limit state is short-lived: never persist
+  model:
+    build: .
+    command: ["python", "ops/fake_model_host.py", "--port", "8003"]
+    volumes: ["./ops:/app/ops:ro"]
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &env
+      CHAT_ENV: dev
+      CHAT_DATABASE_URL: postgresql+asyncpg://chat:chat@postgres:5432/chat
+      CHAT_REDIS_URL: redis://redis:6379/0
+      CHAT_MODEL_BASE_URL: http://model:8003/v1
+      CHAT_AUTH_PROVIDER: dev
+      CHAT_PRODUCT_ADAPTER: mock
+    depends_on: {postgres: {condition: service_healthy}}
+  api:
+    build: .
+    environment: *env
+    ports: ["8090:8090"]
+    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_started}}
+  jobs:
+    build: .
+    command: ["python", "-m", "chat_service.jobs"]
+    environment: *env
+    depends_on: {migrate: {condition: service_completed_successfully}}
+volumes:
+  pgdata: {}

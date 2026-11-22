@@ -28,6 +28,7 @@ from chat_service.billing.caps import LogNotifier, Notifier
 from chat_service.config import Settings
 from chat_service.db.schema import chat_action_rules, chat_actions, chat_subscriptions
 from chat_service.engine.store import OrgSettingsStore
+from chat_service.metrics import ACTIONS
 from chat_service.principal import Principal
 from chat_service.tools.product import ProductAPI, ProductWriteConflict
 from chat_service.tools.registry import Tool, ToolContext, ToolInputError
@@ -279,6 +280,7 @@ class ActionService:
         """Validate and store a proposal. Returns ``{"for_model": ..., "card": ... | None}``."""
 
         def rejected(reason: str) -> dict[str, Any]:
+            ACTIONS.labels(tool_name if tool_name in self.specs else "unknown", "rejected").inc()
             return {"for_model": {"status": "rejected", "reason": reason}, "card": None}
 
         spec = self.specs.get(tool_name)
@@ -340,6 +342,7 @@ class ActionService:
             await conn.execute(chat_actions.insert().values(**row))
         if errors:
             return rejected("; ".join(errors))
+        ACTIONS.labels(tool_name, "proposed").inc()
         if auto:
             view = await self.confirm(principal, row["action_id"])
             return {"for_model": {"status": view["status"], "summary": view["summary"]}, "card": None, "executed": view}
@@ -481,15 +484,18 @@ class ActionService:
         try:
             response = await self.product.write(ctx, row.tool_name, row.args, idempotency_key=str(action_id))
         except PermissionError:
+            ACTIONS.labels(row.tool_name, "failed").inc()
             await self._set(action_id, status="failed", error="permission denied by the product")
             raise ActionError("failed", "the product refused the change: permission denied") from None
         except (ProductWriteConflict, ToolInputError) as exc:
+            ACTIONS.labels(row.tool_name, "failed").inc()
             await self._set(action_id, status="failed", error=str(exc)[:500])
             raise ActionError("failed", f"the change wasn't made: {exc}") from None
         except Exception as exc:  # noqa: BLE001 - unknown outcome: never retried automatically (tier 2–3)
             await self._set(action_id, status="failed", error=f"{type(exc).__name__}: outcome unknown, check the item")
             raise ActionError("failed", "the change may not have been made; please check the item") from None
         await self._set(action_id, status="executed", executed_at=self.clock(), platform_response=response)
+        ACTIONS.labels(row.tool_name, "executed").inc()
         if row.undo_of:
             await self._set(row.undo_of, status="undone")
         return self.view(await self._get_row(principal.org_id, action_id))

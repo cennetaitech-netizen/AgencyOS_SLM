@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-22 · Backend tests: **147 passing** (Postgres 16) · Widget tests: **11 passing** · Migrations: 0001–0003
+Last updated: 2026-11-22 · Backend tests: **163 passing** (Postgres 16 + Redis) · Widget tests: **11 passing** · Migrations: 0001–0004
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -16,7 +16,8 @@ Last updated: 2026-11-22 · Backend tests: **147 passing** (Postgres 16) · Widg
 | Chat actions | 9 | Propose → confirm → execute with all safety rules, undo, kill switches | 25 |
 | Subscription billing | 10 | Plans, overage to spend limit, cycle close, proration, dunning, caps, alerts, invoices | 20 |
 | **Own SLM** | **11** | Dataset builder (consent, scrub, corrections, eval exclusion, DPO pairs), synthetic generator, short fine-tune prompt, LoRA SFT + DPO scripts (CPU smoke-tested with a tiny model), release gate, canary rollout with automatic rollback, runbook, model card | 13 + training smoke run |
-| CI | 7 | Lint, format, migrations, backend tests, widget typecheck/tests/build; model eval on relevant PRs | — |
+| CI | 7 | Lint, format, migrations, backend tests, widget typecheck/tests/build; model eval on relevant PRs; dependency and secret scans | — |
+| **Launch hardening** | **12** | Production start-up guard, security headers/CORS/size limit, audit log, encryption at rest with key rotation, Redis-shared limits, metrics + readiness + 9 SLO alerts, cross-tenant security suite, load test at 3× and failure drill (money checks pass), Dockerfile + compose, runbooks. See [LAUNCH_READINESS.md](LAUNCH_READINESS.md) | 16 + load/drill runs |
 
 ## Blocked on inputs
 | Needed | Unblocks |
@@ -31,5 +32,6 @@ Last updated: 2026-11-22 · Backend tests: **147 passing** (Postgres 16) · Widg
 | The product's design system | Restyling the widget via `--aos-*` variables; embedding it in the product shell |
 
 ## Remaining engineering (no external input needed)
-1. Phase 12 hardening: load test (3× peak), Redis-backed rate/concurrency limits, encryption at rest for tool results, SLO dashboards.
-2. Widget: admin screens for caps, action rules and plan changes (the APIs exist).
+1. Widget: admin screens for caps, action rules and plan changes (the APIs exist).
+2. Grafana dashboard from the panels listed in LAUNCH_READINESS.md §2.
+3. Build and smoke-test the container image in CI (no Docker daemon in this environment).

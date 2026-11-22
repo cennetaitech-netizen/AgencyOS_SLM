@@ -24,6 +24,7 @@ from chat_service.actions.service import ActionService
 from chat_service.billing.tokenizer import DevRegexTokenizer
 from chat_service.billing.wallet import WalletService
 from chat_service.config import Settings
+from chat_service.crypto import FieldCipher
 from chat_service.engine.agent import REFUSAL_SENTENCE, ChatEngine
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, StreamEnd, TextDelta
@@ -133,7 +134,7 @@ async def run_synthetic(
 
     banned = {normalise_question(q) for q in eval_questions}
     orgs = OrgSettingsStore(db)
-    store = ConversationStore(db)
+    store = ConversationStore(db, FieldCipher(settings.data_encryption_keys))
     report = SyntheticReport()
     org_ids: list[uuid.UUID] = []
     for task in tasks or SEED_TASKS:
@@ -198,6 +199,12 @@ async def run_synthetic(
             )
     tool_schemas = build_registry(settings, MockProductAPI()).schemas(include_write=True)
     records, pairs, build_report = await export_records(
-        db, system_template, tool_schemas, eval_questions, org_ids=org_ids, source="synthetic"
+        db,
+        system_template,
+        tool_schemas,
+        eval_questions,
+        org_ids=org_ids,
+        source="synthetic",
+        cipher=FieldCipher(settings.data_encryption_keys),
     )
     return records, pairs, build_report, report

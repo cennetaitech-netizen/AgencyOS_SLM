@@ -84,7 +84,7 @@ class PlanBody(BaseModel):
     active: bool = True
 
 
-def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:  # noqa: C901 - route table
+def register_m2_routes(app: FastAPI, services, principal, require_role, audited) -> None:  # noqa: C901 - route table
     org_admin = require_role("org_admin_role")
     staff = require_role("staff_role")
 
@@ -143,7 +143,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
     async def get_action_rules(p: Principal = Depends(org_admin), svc=Depends(services)):
         return (await svc.actions.rules(p.org_id)).__dict__
 
-    @app.put("/chat/action-rules")
+    @app.put("/chat/action-rules", dependencies=[audited("action_rules_updated", "self")])
     async def put_action_rules(body: ActionRulesBody, p: Principal = Depends(org_admin), svc=Depends(services)):
         values = body.model_dump(exclude_unset=True)
         return (await _do(svc.actions.set_rules, p.org_id, **values)).__dict__
@@ -159,7 +159,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
         sub = await svc.subscriptions.get(p.org_id)
         return {"subscription": sub.__dict__ if sub else None, "capacity_tokens": await svc.wallet.capacity(p.org_id)}
 
-    @app.post("/chat/billing/subscription", status_code=201)
+    @app.post("/chat/billing/subscription", status_code=201, dependencies=[audited("subscription_started", "self")])
     async def subscribe(body: SubscribeBody, p: Principal = Depends(org_admin), svc=Depends(services)):
         try:
             invoice_id = await svc.subscriptions.subscribe(p.org_id, body.plan_id, body.spend_limit_minor)
@@ -168,7 +168,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
         await svc.analytics.track("subscription_started", p.org_id, p.user_id, {"plan_id": body.plan_id})
         return {"invoice_id": str(invoice_id) if invoice_id else None}
 
-    @app.put("/chat/billing/subscription")
+    @app.put("/chat/billing/subscription", dependencies=[audited("subscription_updated", "self")])
     async def update_subscription(body: SubscriptionUpdate, p: Principal = Depends(org_admin), svc=Depends(services)):
         result: dict[str, Any] = {}
         try:
@@ -194,7 +194,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
             ).first()
         return {"profile": dict(row._mapping) if row else None}
 
-    @app.put("/chat/billing/profile")
+    @app.put("/chat/billing/profile", dependencies=[audited("billing_profile_updated", "self")])
     async def put_profile(body: BillingProfileBody, p: Principal = Depends(org_admin), svc=Depends(services)):
         from sqlalchemy import func
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -241,7 +241,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
     async def list_caps(p: Principal = Depends(org_admin), svc=Depends(services)):
         return {"caps": await svc.caps.list_caps(p.org_id)}
 
-    @app.put("/chat/caps", status_code=201)
+    @app.put("/chat/caps", status_code=201, dependencies=[audited("cap_set", "self")])
     async def put_cap(body: CapBody, p: Principal = Depends(org_admin), svc=Depends(services)):
         try:
             cap_id = await svc.caps.set_cap(
@@ -251,14 +251,14 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
             raise HTTPException(422, str(exc)) from exc
         return {"cap_id": str(cap_id)}
 
-    @app.delete("/chat/caps/{cap_id}", status_code=204)
+    @app.delete("/chat/caps/{cap_id}", status_code=204, dependencies=[audited("cap_deleted", "self")])
     async def delete_cap(cap_id: uuid.UUID, p: Principal = Depends(org_admin), svc=Depends(services)) -> None:
         if not await svc.caps.delete_cap(p.org_id, cap_id):
             raise HTTPException(404, "cap not found")
 
     # ------------------------------------------------------------------ staff: plans, invoices, cycles
 
-    @app.put("/chat/admin/plans/{plan_id}")
+    @app.put("/chat/admin/plans/{plan_id}", dependencies=[audited("plan_upserted", "global")])
     async def admin_plan(plan_id: str, body: PlanBody, p: Principal = Depends(staff), svc=Depends(services)):
         try:
             await svc.subscriptions.upsert_plan(plan_id=plan_id, **body.model_dump())
@@ -270,21 +270,23 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
     async def admin_org_invoices(org_id: uuid.UUID, p: Principal = Depends(staff), svc=Depends(services)):
         return {"invoices": await svc.invoices.list(org_id, include_drafts=True)}
 
-    @app.post("/chat/admin/invoices/{invoice_id}/approve")
+    @app.post("/chat/admin/invoices/{invoice_id}/approve", dependencies=[audited("invoice_approved", "global")])
     async def admin_approve_invoice(invoice_id: uuid.UUID, p: Principal = Depends(staff), svc=Depends(services)):
         try:
             return (await svc.invoices.approve_and_send(invoice_id, p.user_id)).__dict__
         except InvoiceError as exc:
             raise HTTPException(409, str(exc)) from exc
 
-    @app.post("/chat/admin/invoices/{invoice_id}/void", status_code=204)
+    @app.post(
+        "/chat/admin/invoices/{invoice_id}/void", status_code=204, dependencies=[audited("invoice_voided", "global")]
+    )
     async def admin_void_invoice(invoice_id: uuid.UUID, p: Principal = Depends(staff), svc=Depends(services)) -> None:
         try:
             await svc.invoices.void(invoice_id)
         except InvoiceError as exc:
             raise HTTPException(409, str(exc)) from exc
 
-    @app.post("/chat/admin/billing/close-cycles")
+    @app.post("/chat/admin/billing/close-cycles", dependencies=[audited("billing_cycles_closed", "global")])
     async def admin_close_cycles(p: Principal = Depends(staff), svc=Depends(services)):
         created = await svc.subscriptions.close_due_cycles()
         return {"invoices_created": [str(i) for i in created]}

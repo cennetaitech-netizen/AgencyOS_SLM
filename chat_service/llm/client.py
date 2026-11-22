@@ -157,5 +157,8 @@ class FallbackModelClient:
             if not (exc.before_first_token and self.fallback):
                 raise
         self.last_serving_host = "fallback"
+        from chat_service.metrics import MODEL_FALLBACK
+
+        MODEL_FALLBACK.inc()
         async for ev in self.fallback.stream(messages, tools, max_tokens, temperature):
             yield ev

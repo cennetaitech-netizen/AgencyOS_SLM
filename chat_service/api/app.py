@@ -19,19 +19,25 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from chat_service.actions.service import ActionService
 from chat_service.analytics.events import LogAnalyticsSink
 from chat_service.api.auth import AuthProvider, DevAuthProvider, ProductAuthProvider
+from chat_service.api.security import SecurityMiddleware
+from chat_service.audit import AuditLog
 from chat_service.billing.caps import CapsService, LogNotifier
 from chat_service.billing.invoices import InvoiceError, InvoiceService, LogInvoiceSink
 from chat_service.billing.payments import DevPaymentProvider, PaymentProvider, WebhookSignatureError
 from chat_service.billing.subscriptions import SubscriptionService
 from chat_service.billing.tokenizer import build_tokenizer
 from chat_service.billing.wallet import WalletError, WalletService
-from chat_service.config import Settings, get_settings
+from chat_service.config import Settings, get_settings, production_problems
+from chat_service.crypto import FieldCipher
 from chat_service.db import create_engine
 from chat_service.db.schema import chat_token_packs, chat_usage_events
 from chat_service.engine.agent import ChatEngine
+from chat_service.engine.limits import build_limiters
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import FallbackModelClient, ModelClient, OpenAICompatibleClient
 from chat_service.llm.router import ModelRouter, RolloutStore
+from chat_service.metrics import HttpMetricsMiddleware
+from chat_service.metrics import render as render_metrics
 from chat_service.principal import Principal
 from chat_service.tools import build_registry, default_product_api
 from chat_service.tools.product import ProductAPI
@@ -82,7 +88,8 @@ class Services:
         self.db = db
         self.product_api = product_api or default_product_api(settings)
         self.wallet = WalletService(db, settings)
-        self.conversations = ConversationStore(db)
+        self.cipher = FieldCipher(settings.data_encryption_keys)
+        self.conversations = ConversationStore(db, self.cipher)
         self.orgs = OrgSettingsStore(db)
         self.auth = auth
         self.payments = payments
@@ -92,6 +99,8 @@ class Services:
         self.caps = CapsService(db, self.notifier, settings.alert_thresholds)
         self.actions = ActionService(db, settings, self.product_api, orgs=self.orgs, notifier=self.notifier)
         self.analytics = LogAnalyticsSink()  # TODO(Phase 7): product analytics tool
+        self.audit = AuditLog(db)
+        self.rate_limiter, self.concurrency_limiter = build_limiters(settings)
         self.model = model
         self.rollout = model.store if isinstance(model, ModelRouter) else RolloutStore(db, settings.model_name)
         self.chat = ChatEngine(
@@ -106,6 +115,8 @@ class Services:
             subscriptions=self.subscriptions,
             caps=self.caps,
             analytics=self.analytics,
+            rate_limiter=self.rate_limiter,
+            concurrency=self.concurrency_limiter,
         )
 
 
@@ -149,6 +160,10 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     owns_db = db is None
+    if settings.env == "production":
+        problems = production_problems(settings)
+        if problems:
+            raise RuntimeError("unsafe production configuration:\n- " + "\n- ".join(problems))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -165,13 +180,58 @@ def create_app(
         if owns_db:
             await engine.dispose()
 
-    app = FastAPI(title="AgencyOS Assistant API", version="0.1.0", lifespan=lifespan)
+    is_prod = settings.env == "production"
+    app = FastAPI(
+        title="AgencyOS Assistant API",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else "/openapi.json",
+    )
+    if settings.cors_allowed_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        )
+    app.add_middleware(HttpMetricsMiddleware)
+    app.add_middleware(
+        SecurityMiddleware,
+        max_request_bytes=settings.max_request_bytes,
+        hsts=is_prod,
+        docs_paths=("/docs", "/redoc", "/openapi.json"),
+    )
 
     def services(request: Request) -> Services:
         return request.app.state.services
 
     async def principal(request: Request, svc: Services = Depends(services)) -> Principal:
         return await svc.auth.authenticate(request)
+
+    def audited(action: str, target: str = "path"):
+        """Record a successful change in the audit log. target: 'path' (org_id path param), 'self' (the
+        caller's org) or 'global' (platform-wide, e.g. plans and model rollout)."""
+
+        async def dep(request: Request, p: Principal = Depends(principal), svc: Services = Depends(services)):
+            yield
+            target_org = None
+            if target == "path" and "org_id" in request.path_params:
+                target_org = uuid.UUID(str(request.path_params["org_id"]))
+            elif target == "self":
+                target_org = p.org_id
+            try:
+                body = await request.json() if request.method != "DELETE" else None
+            except Exception:  # noqa: BLE001 - no/invalid JSON body
+                body = None
+            details = {"method": request.method, "path": request.url.path, "body": body}
+            await svc.audit.record(p, action, target_org, details)
+
+        return Depends(dep)
 
     def require_role(role_attr: str):
         async def dep(p: Principal = Depends(principal), svc: Services = Depends(services)) -> Principal:
@@ -185,7 +245,43 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
+        """Liveness: the process is up."""
         return {"status": "ok"}
+
+    @app.get("/readyz")
+    async def readyz(svc: Services = Depends(services)):
+        """Readiness: dependencies reachable. Load balancers send traffic only when this is 200."""
+        from fastapi.responses import JSONResponse
+        from sqlalchemy import text as sql_text
+
+        checks: dict[str, str] = {}
+        try:
+            async with svc.db.connect() as conn:
+                await conn.execute(sql_text("SELECT 1"))
+            checks["database"] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            checks["database"] = f"error: {type(exc).__name__}"
+        redis = getattr(svc.rate_limiter, "redis", None)
+        if redis is not None:
+            try:
+                await redis.ping()
+                checks["redis"] = "ok"
+            except Exception as exc:  # noqa: BLE001 - limits fail open, so this degrades rather than fails
+                checks["redis"] = f"degraded: {type(exc).__name__}"
+        ok = checks["database"] == "ok"
+        return JSONResponse(
+            {"status": "ready" if ok else "not_ready", "checks": checks}, status_code=200 if ok else 503
+        )
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics_endpoint(request: Request, svc: Services = Depends(services)):
+        from fastapi.responses import Response
+
+        token = svc.settings.metrics_token
+        if token and request.headers.get("authorization") != f"Bearer {token}":
+            raise HTTPException(401, "metrics token required")
+        body, content_type = render_metrics()
+        return Response(body, media_type=content_type)
 
     # ------------------------------------------------------------------ conversations
 
@@ -347,7 +443,7 @@ def create_app(
 
     # ------------------------------------------------------------------ buying packs
 
-    @app.post("/chat/billing/checkout")
+    @app.post("/chat/billing/checkout", dependencies=[audited("checkout_started", "self")])
     async def checkout(
         body: CheckoutRequest, p: Principal = Depends(require_role("org_admin_role")), svc: Services = Depends(services)
     ):
@@ -398,7 +494,7 @@ def create_app(
 
     # ------------------------------------------------------------------ internal admin (AgencyOS staff)
 
-    @app.put("/chat/admin/orgs/{org_id}/settings")
+    @app.put("/chat/admin/orgs/{org_id}/settings", dependencies=[audited("org_settings_updated")])
     async def admin_org_settings(
         org_id: uuid.UUID,
         body: OrgSettingsUpdate,
@@ -416,7 +512,7 @@ def create_app(
         org = await svc.orgs.upsert(org_id, **values)
         return org.__dict__ | {"org_id": str(org.org_id)}
 
-    @app.post("/chat/admin/orgs/{org_id}/goodwill", status_code=201)
+    @app.post("/chat/admin/orgs/{org_id}/goodwill", status_code=201, dependencies=[audited("goodwill_granted")])
     async def admin_goodwill(
         org_id: uuid.UUID,
         body: Goodwill,
@@ -428,10 +524,10 @@ def create_app(
 
     from chat_service.api.routes_m2 import register_m2_routes
 
-    register_m2_routes(app, services, principal, require_role)
+    register_m2_routes(app, services, principal, require_role, audited)
     from chat_service.api.routes_ops import register_ops_routes
 
-    register_ops_routes(app, services, principal, require_role)
+    register_ops_routes(app, services, principal, require_role, audited)
     return app
 
 

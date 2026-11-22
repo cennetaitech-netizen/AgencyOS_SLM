@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from chat_service.crypto import FieldCipher
 from chat_service.db.schema import (
     chat_conversations,
     chat_feedback,
@@ -67,8 +68,9 @@ class OrgSettingsStore:
 
 
 class ConversationStore:
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(self, engine: AsyncEngine, cipher: FieldCipher | None = None) -> None:
         self.engine = engine
+        self.cipher = cipher or FieldCipher()
 
     async def create(self, org_id: uuid.UUID, user_id: uuid.UUID, title: str | None = None) -> uuid.UUID:
         cid = uuid.uuid4()
@@ -163,7 +165,16 @@ class ConversationStore:
             return
         async with self.engine.begin() as conn:
             await conn.execute(
-                chat_tool_calls.insert(), [{"id": uuid.uuid4(), "message_id": message_id, **r} for r in records]
+                chat_tool_calls.insert(),
+                [
+                    {
+                        "id": uuid.uuid4(),
+                        "message_id": message_id,
+                        **r,
+                        "result": self.cipher.encrypt_json(r.get("result")),
+                    }
+                    for r in records
+                ],
             )
 
     async def count_user_turns(self, conversation_id: uuid.UUID) -> int:

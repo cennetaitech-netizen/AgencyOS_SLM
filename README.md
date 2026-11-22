@@ -71,10 +71,12 @@ python -m chat_service.evals.bakeoff --models evals/models.json
 | `chat_service/llm/router.py` | Model rollout: canary, per-org pinning, automatic rollback |
 | `ml/` | LoRA SFT/DPO training scripts, configs, runbook ([ml/README.md](ml/README.md)) |
 | `widget/` | React chat window and billing page ([widget/README.md](widget/README.md)) |
+| `ops/` | Load test, failure-drill model host, money checks, Prometheus alert rules |
+| `Dockerfile`, `docker-compose.yml` | Container image and local full stack |
 | `migrations/` | Alembic migrations |
 
 ## Planning documents
-- **Build status:** [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) · **Shared contracts:** [docs/contracts/CONTRACTS.md](docs/contracts/CONTRACTS.md)
+- **Launch readiness (Phase 12):** [docs/LAUNCH_READINESS.md](docs/LAUNCH_READINESS.md) · **Build status:** [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) · **Shared contracts:** [docs/contracts/CONTRACTS.md](docs/contracts/CONTRACTS.md)
 - **Combined release plan (M1 + M2 together, ~14–16 weeks):** [docs/COMBINED_RELEASE_PLAN.md](docs/COMBINED_RELEASE_PLAN.md)
 - **Implementation guide (Phases 0–12):** [docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md)
 - **Business readiness drafts:** [governance & pricing](docs/business/GOVERNANCE_AND_PRICING.md) · [legal & finance](docs/business/LEGAL_AND_FINANCE_DRAFTS.md) · [support, pilot & launch](docs/business/SUPPORT_PILOT_LAUNCH_KIT.md)

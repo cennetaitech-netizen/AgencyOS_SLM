@@ -448,3 +448,19 @@ chat_model_rollout = Table(
     CheckConstraint("canary_percent >= 0 AND canary_percent <= 100", name="percent_valid"),
     CheckConstraint("status IN ('idle','canary','promoted','rolled_back')", name="status_valid"),
 )
+
+# --------------------------------------------------------------------------- audit log (Phase 12)
+
+chat_audit_log = Table(
+    "chat_audit_log",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    _ts("occurred_at"),
+    Column("actor_user_id", UUID(as_uuid=True), nullable=False),
+    Column("actor_org_id", UUID(as_uuid=True), nullable=False),
+    Column("actor_roles", ARRAY(Text), nullable=False, server_default=text("'{}'")),
+    Column("action", String(64), nullable=False),
+    Column("target_org_id", UUID(as_uuid=True), nullable=True, index=True),
+    Column("details", JSONB, nullable=True),
+    Column("request_id", String(64), nullable=True),
+)

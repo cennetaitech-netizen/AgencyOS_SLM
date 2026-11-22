@@ -1,0 +1,36 @@
+name: security
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"  # weekly: new advisories appear even when the code doesn't change
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . pip-audit
+      - name: Python dependency vulnerabilities
+        run: pip-audit --skip-editable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Widget dependency vulnerabilities
+        working-directory: widget
+        run: npm ci && npm audit --omit=dev --audit-level=high
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets
+        uses: trufflesecurity/trufflehog@v3.88.0
+        with:
+          extra_args: --only-verified

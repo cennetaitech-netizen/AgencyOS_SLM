@@ -1,0 +1,12 @@
+.git
+.venv
+.venv-ml
+widget/node_modules
+widget/dist
+ml/runs
+ml/data
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.env
+dump.rdb

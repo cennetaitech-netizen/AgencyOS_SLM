@@ -17,6 +17,9 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U chat" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
     env:
       CHAT_ENV: test
       CHAT_DATABASE_URL: postgresql+asyncpg://chat:chat@localhost:5432/chat_test
@@ -27,7 +30,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check chat_service tests migrations ml
+      - run: ruff check chat_service tests migrations ml ops
       - run: ruff format --check chat_service tests
       - name: Migration applies and matches the schema
         run: alembic upgrade head && alembic check && alembic downgrade base

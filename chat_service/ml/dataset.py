@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from chat_service.crypto import FieldCipher
 from chat_service.db.schema import chat_conversations, chat_feedback, chat_messages, chat_org_settings, chat_tool_calls
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
@@ -102,10 +103,12 @@ async def export_records(
     corrections: dict[str, str] | None = None,
     org_ids: list[uuid.UUID] | None = None,
     source: str = "consented",
+    cipher: FieldCipher | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], BuildReport]:
     """Return (SFT records, DPO pairs, report). ``org_ids`` restricts the export (e.g. synthetic runs);
     consent is always required."""
     corrections = corrections or {}
+    cipher = cipher or FieldCipher()
     banned = {normalise_question(q) for q in eval_questions}
     report = BuildReport()
     records: list[dict[str, Any]] = []
@@ -181,7 +184,7 @@ async def export_records(
                         }
                     )
                     for cid, call in zip(ids, step_calls, strict=True):
-                        content = call.result if call.ok else {"error": call.error}
+                        content = cipher.decrypt_json(call.result) if call.ok else {"error": call.error}
                         turn.append(
                             {
                                 "role": "tool",

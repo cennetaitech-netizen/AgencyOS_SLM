@@ -100,9 +100,43 @@ class Settings(BaseSettings):
     approver_role: str = "org_admin"
     prompt_version_actions: str = "system_v2"
 
+    # Production hardening (Phase 12)
+    cors_allowed_origins: list[str] = Field(default_factory=list)  # e.g. ["https://app.agencyos.example"]
+    max_request_bytes: int = 256_000
+    data_encryption_keys: list[str] = Field(default_factory=list, repr=False)  # Fernet keys; first = current
+    redis_url: str | None = None  # shared rate/concurrency limits across instances
+    stream_slot_lease_seconds: int = 180  # a crashed instance's slots free up after this
+    metrics_token: str | None = Field(default=None, repr=False)  # bearer token for GET /metrics
+
     # Roles (names as the product issues them; confirm in Phase 0)
     org_admin_role: str = "org_admin"
     staff_role: str = "agencyos_staff"
+
+
+def production_problems(s: Settings) -> list[str]:
+    """Settings that are fine for development but unsafe in production. The app refuses to start with any."""
+    problems = []
+    if s.auth_provider == "dev":
+        problems.append("CHAT_AUTH_PROVIDER=dev (header-based identities) is not allowed")
+    if s.product_adapter != "http":
+        problems.append("CHAT_PRODUCT_ADAPTER must be 'http' (the mock product is for development)")
+    if s.payment_provider == "dev":
+        problems.append("CHAT_PAYMENT_PROVIDER=dev: configure the real payment provider (decision D9)")
+    if s.payment_webhook_secret in ("", "dev-webhook-secret", "change-me"):
+        problems.append("CHAT_PAYMENT_WEBHOOK_SECRET is missing or a default value")
+    if not s.billing_tokenizer_path:
+        problems.append("CHAT_BILLING_TOKENIZER_PATH must point to the pinned billing tokenizer")
+    if not s.data_encryption_keys:
+        problems.append("CHAT_DATA_ENCRYPTION_KEYS is required (encryption of stored tool results)")
+    if not s.redis_url:
+        problems.append("CHAT_REDIS_URL is required (shared rate and concurrency limits)")
+    if not s.cors_allowed_origins or "*" in s.cors_allowed_origins:
+        problems.append("CHAT_CORS_ALLOWED_ORIGINS must list the AgencyOS web origins (no '*')")
+    if not s.metrics_token:
+        problems.append("CHAT_METRICS_TOKEN is required to protect /metrics")
+    if "chat:chat@localhost" in s.database_url:
+        problems.append("CHAT_DATABASE_URL still points at the local development database")
+    return problems
 
 
 @lru_cache

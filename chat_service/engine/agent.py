@@ -19,11 +19,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
+from chat_service import metrics
 from chat_service.billing.tokenizer import BillingTokenizer
 from chat_service.billing.wallet import Reservation, UsageRecord, WalletService
 from chat_service.config import Settings
 from chat_service.engine.grounding import ungrounded_numbers
-from chat_service.engine.limits import ConcurrencyLimiter, RateLimiter
+from chat_service.engine.limits import ConcurrencyLimiter, MemoryConcurrencyLimiter, MemoryRateLimiter, RateLimiter
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, ModelError, StreamEnd, TextDelta
 from chat_service.principal import Principal
@@ -49,6 +50,7 @@ def event(name: str, **data: Any) -> dict[str, Any]:
 
 
 def error_event(code: str, message: str) -> dict[str, Any]:
+    metrics.ERRORS.labels(code).inc()
     return event("error", code=code, message=message, charged=False)
 
 
@@ -90,6 +92,8 @@ class ChatEngine:
         subscriptions: SubscriptionService | None = None,
         caps: CapsService | None = None,
         analytics: AnalyticsSink | None = None,
+        rate_limiter: RateLimiter | None = None,
+        concurrency: ConcurrencyLimiter | None = None,
     ) -> None:
         self.s = settings
         self.wallet = wallet
@@ -99,8 +103,8 @@ class ChatEngine:
         self.conversations = conversations
         self.orgs = orgs
         self.clock = clock
-        self.rate_limiter = RateLimiter(settings.rate_limit_per_user_per_min)
-        self.concurrency = ConcurrencyLimiter(settings.max_concurrent_streams_per_org)
+        self.rate_limiter = rate_limiter or MemoryRateLimiter(settings.rate_limit_per_user_per_min)
+        self.concurrency = concurrency or MemoryConcurrencyLimiter(settings.max_concurrent_streams_per_org)
         self.actions = actions
         self.subscriptions = subscriptions
         self.caps = caps
@@ -140,10 +144,13 @@ class ChatEngine:
         if await self.wallet.global_host_tokens_since(day_start_utc) >= s.global_daily_host_token_ceiling:
             yield error_event("chat_disabled", "The assistant is at capacity right now. Please try again later.")
             return
-        if not self.rate_limiter.allow(user_id):
+        if not await self.rate_limiter.allow(user_id):
+            log.warning("refused: per-user rate limit org=%s user=%s", org_id, user_id)
             yield error_event("rate_limited", "You're sending messages too quickly. Please wait a moment.")
             return
-        if not self.concurrency.try_acquire(org_id):
+        slot = await self.concurrency.try_acquire(org_id)
+        if slot is None:
+            log.warning("refused: org concurrency limit org=%s", org_id)
             yield error_event("rate_limited", "Too many replies are in progress for your organisation.")
             return
         try:
@@ -153,7 +160,7 @@ class ChatEngine:
                 async for ev in inner:
                     yield ev
         finally:
-            self.concurrency.release(org_id)
+            await self.concurrency.release(org_id, slot)
 
     # ------------------------------------------------------------------ internals
 
@@ -372,6 +379,7 @@ class ChatEngine:
                         ctx, call.name, call.arguments, s.tool_timeout_seconds, s.tool_result_max_chars
                     )
                     yield event("tool.end", tool=call.name, ok=result.ok)
+                    metrics.TOOL_CALLS.labels(call.name if tool else "unknown", str(result.ok).lower()).inc()
                     if result.ok:
                         turn.client_id = turn.client_id or _client_of(result.data)
                         turn.sources.append(result.data)
@@ -479,6 +487,16 @@ class ChatEngine:
             "ungrounded_numbers": len((flags or {}).get("ungrounded_numbers", [])),
         }
         log.info("chat_message %s", json.dumps(record))
+        model_name = record["model"] or "unknown"
+        metrics.MESSAGES.labels("refusal" if refusal else status, mode).inc()
+        metrics.MESSAGE_LATENCY.observe(record["latency_ms"] / 1000)
+        if turn.ttft_ms is not None:
+            metrics.TTFT.observe(turn.ttft_ms / 1000)
+        metrics.BILLABLE_TOKENS.labels(mode).inc(charged)
+        metrics.HOST_TOKENS.labels("prompt", model_name).inc(turn.host_prompt)
+        metrics.HOST_TOKENS.labels("completion", model_name).inc(turn.host_completion)
+        if record["ungrounded_numbers"]:
+            metrics.UNGROUNDED.inc()
         if status != "ok":
             await self._track("chat_error", principal, reason=status)
             return

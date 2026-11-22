@@ -38,7 +38,7 @@ def _range(date_from: date, date_to: date, max_days: int = 92) -> tuple[datetime
     return datetime.combine(date_from, time.min, UTC), datetime.combine(date_to + timedelta(days=1), time.min, UTC)
 
 
-def register_ops_routes(app: FastAPI, services, principal, require_role) -> None:
+def register_ops_routes(app: FastAPI, services, principal, require_role, audited) -> None:
     org_admin = require_role("org_admin_role")
     staff = require_role("staff_role")
 
@@ -55,7 +55,7 @@ def register_ops_routes(app: FastAPI, services, principal, require_role) -> None
             "training_consent": org.training_consent,
         }
 
-    @app.put("/chat/settings/training-consent")
+    @app.put("/chat/settings/training-consent", dependencies=[audited("training_consent_changed", "self")])
     async def training_consent(body: ConsentBody, p: Principal = Depends(org_admin), svc=Depends(services)):
         await svc.orgs.upsert(
             p.org_id,
@@ -122,21 +122,30 @@ def register_ops_routes(app: FastAPI, services, principal, require_role) -> None
         models = sorted(svc.model.clients) if isinstance(svc.model, ModelRouter) else [svc.model.name]
         return st.__dict__ | {"available_models": models}
 
-    @app.post("/chat/admin/model-rollout/canary")
+    @app.post("/chat/admin/model-rollout/canary", dependencies=[audited("model_canary_started", "global")])
     async def start_canary(body: CanaryBody, p: Principal = Depends(staff), svc=Depends(services)):
         return await _rollout(_router(svc).store.start_canary, body.model, body.percent)
 
-    @app.post("/chat/admin/model-rollout/percent")
+    @app.post("/chat/admin/model-rollout/percent", dependencies=[audited("model_canary_percent", "global")])
     async def canary_percent(body: PercentBody, p: Principal = Depends(staff), svc=Depends(services)):
         return await _rollout(_router(svc).store.set_percent, body.percent)
 
-    @app.post("/chat/admin/model-rollout/promote")
+    @app.post("/chat/admin/model-rollout/promote", dependencies=[audited("model_promoted", "global")])
     async def promote(p: Principal = Depends(staff), svc=Depends(services)):
         return await _rollout(_router(svc).store.promote)
 
-    @app.post("/chat/admin/model-rollout/rollback")
+    @app.post("/chat/admin/model-rollout/rollback", dependencies=[audited("model_rolled_back", "global")])
     async def rollback(body: RollbackBody, p: Principal = Depends(staff), svc=Depends(services)):
         return await _rollout(_router(svc).store.rollback, f"manual: {body.reason}")
+
+    @app.get("/chat/admin/audit")
+    async def audit_log(
+        org_id: uuid.UUID | None = None,
+        limit: int = Query(200, ge=1, le=1000),
+        p: Principal = Depends(staff),
+        svc=Depends(services),
+    ):
+        return {"entries": await svc.audit.list(org_id, limit)}
 
     @app.post("/chat/admin/model-rollout/evaluate")
     async def evaluate(p: Principal = Depends(staff), svc=Depends(services)):

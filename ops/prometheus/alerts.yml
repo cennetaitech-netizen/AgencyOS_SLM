@@ -1,0 +1,82 @@
+# AgencyOS Assistant alert rules (Phase 12). Launch SLOs: 99.5% availability, p95 time-to-first-token < 1.5 s.
+# "page" = wake the on-call engineer; "ticket" = handle in working hours. Runbooks: docs/LAUNCH_READINESS.md §4.
+groups:
+  - name: agencyos-assistant-slo
+    rules:
+      - alert: AosAvailabilityBudgetBurn
+        expr: |
+          sum(rate(aos_http_requests_total{status=~"5.."}[30m]))
+            / sum(rate(aos_http_requests_total[30m])) > 0.005
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "More than 0.5% of API requests are failing (availability SLO 99.5%)"
+          runbook: "LAUNCH_READINESS.md#rb-api-errors"
+
+      - alert: AosChatReplyErrors
+        expr: |
+          sum(rate(aos_chat_messages_total{status=~"model_error|internal_error"}[15m]))
+            / sum(rate(aos_chat_messages_total[15m])) > 0.02
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "More than 2% of assistant replies are failing (clients are not charged for these)"
+          runbook: "LAUNCH_READINESS.md#rb-model-host"
+
+      - alert: AosTimeToFirstTokenSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(aos_chat_time_to_first_token_seconds_bucket[10m]))) > 1.5
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "p95 time to first token above 1.5 s"
+          runbook: "LAUNCH_READINESS.md#rb-latency"
+
+      - alert: AosModelFallbackActive
+        expr: sum(rate(aos_model_fallback_total[10m])) > 0.05
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Primary model host failing; traffic is going to the fallback host"
+          runbook: "LAUNCH_READINESS.md#rb-model-host"
+
+      - alert: AosLimiterFailOpen
+        expr: sum(increase(aos_limiter_fail_open_total[5m])) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "Redis unreachable: rate and concurrency limits are not enforced (billing is still safe)"
+          runbook: "LAUNCH_READINESS.md#rb-redis"
+
+      - alert: AosActionFailures
+        expr: sum(increase(aos_chat_actions_total{outcome="failed"}[30m])) > 3
+        labels: {severity: page}
+        annotations:
+          summary: "Several confirmed chat actions failed against the product/ad platforms"
+          runbook: "LAUNCH_READINESS.md#rb-actions"
+
+      - alert: AosUngroundedAnswersHigh
+        expr: |
+          sum(rate(aos_chat_ungrounded_answers_total[1h]))
+            / sum(rate(aos_chat_messages_total{status="ok"}[1h])) > 0.05
+        for: 30m
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than 5% of answers contain figures not found in tool data"
+          runbook: "LAUNCH_READINESS.md#rb-quality"
+
+      - alert: AosOverheadRatioHigh
+        expr: |
+          sum(rate(aos_chat_host_tokens_total[1h])) / sum(rate(aos_chat_billable_tokens_total[1h])) > 20
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Hidden cost per message is above 20x billable tokens (margin at risk)"
+          runbook: "LAUNCH_READINESS.md#rb-margin"
+
+      - alert: AosInstanceDown
+        expr: up{job="agencyos-assistant"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "An assistant instance is not responding to scrapes"
+          runbook: "LAUNCH_READINESS.md#rb-api-errors"
