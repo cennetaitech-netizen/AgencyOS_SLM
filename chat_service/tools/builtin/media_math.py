@@ -87,7 +87,9 @@ def calculate(operation: str, values: dict[str, Any]) -> dict[str, Any]:
             )
         )
     elif operation == "cpm":
-        result = _r(_d(values["spend"], "spend") / _nonzero(_d(values["impressions"], "impressions"), "impressions") * 1000)
+        result = _r(
+            _d(values["spend"], "spend") / _nonzero(_d(values["impressions"], "impressions"), "impressions") * 1000
+        )
     elif operation == "clicks_from_cpc":
         result = int(
             (_d(values["budget"], "budget") / _nonzero(_d(values["cpc"], "cpc"), "cpc")).to_integral_value(
@@ -97,7 +99,9 @@ def calculate(operation: str, values: dict[str, Any]) -> dict[str, Any]:
     elif operation == "cpc":
         result = _r(_d(values["spend"], "spend") / _nonzero(_d(values["clicks"], "clicks"), "clicks"))
     elif operation == "ctr":
-        result = _r(_d(values["clicks"], "clicks") / _nonzero(_d(values["impressions"], "impressions"), "impressions") * 100)
+        result = _r(
+            _d(values["clicks"], "clicks") / _nonzero(_d(values["impressions"], "impressions"), "impressions") * 100
+        )
     elif operation == "cpa":
         result = _r(_d(values["spend"], "spend") / _nonzero(_d(values["conversions"], "conversions"), "conversions"))
     elif operation == "conversions_from_cpa":

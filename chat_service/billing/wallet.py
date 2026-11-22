@@ -192,9 +192,7 @@ class WalletService:
                     granted_at=now,
                     expires_at=now + timedelta(days=self.settings.free_trial_days),
                 )
-                .on_conflict_do_nothing(
-                    index_elements=["org_id"], index_where=text("source = 'free_trial'")
-                )
+                .on_conflict_do_nothing(index_elements=["org_id"], index_where=text("source = 'free_trial'"))
                 .returning(chat_credit_buckets.c.bucket_id)
             )
             if result.first() is None:
@@ -272,9 +270,7 @@ class WalletService:
             if payment.status == "paid":
                 existing = (
                     await conn.execute(
-                        select(chat_credit_buckets.c.bucket_id).where(
-                            chat_credit_buckets.c.payment_id == payment.id
-                        )
+                        select(chat_credit_buckets.c.bucket_id).where(chat_credit_buckets.c.payment_id == payment.id)
                     )
                 ).scalar_one()
                 return existing
@@ -291,9 +287,7 @@ class WalletService:
                 self.clock() + timedelta(days=pack.validity_days),
                 payment_id=payment.id,
             )
-            await conn.execute(
-                update(chat_payments).where(chat_payments.c.id == payment.id).values(status="paid")
-            )
+            await conn.execute(update(chat_payments).where(chat_payments.c.id == payment.id).values(status="paid"))
             return bucket_id
 
     async def reverse_purchase(self, provider_payment_id: str, new_status: str = "refunded") -> ReverseResult:
@@ -316,9 +310,7 @@ class WalletService:
                 raise WalletError("unknown payment")
             if payment.status not in ("paid", "refunded", "disputed"):
                 raise WalletError(f"payment in status {payment.status!r} can't be reversed")
-            await conn.execute(
-                update(chat_payments).where(chat_payments.c.id == payment.id).values(status=new_status)
-            )
+            await conn.execute(update(chat_payments).where(chat_payments.c.id == payment.id).values(status=new_status))
             wallet = (
                 await conn.execute(
                     select(chat_wallets).where(chat_wallets.c.org_id == payment.org_id).with_for_update()
@@ -326,9 +318,7 @@ class WalletService:
             ).one()
             bucket = (
                 await conn.execute(
-                    select(chat_credit_buckets)
-                    .where(chat_credit_buckets.c.payment_id == payment.id)
-                    .with_for_update()
+                    select(chat_credit_buckets).where(chat_credit_buckets.c.payment_id == payment.id).with_for_update()
                 )
             ).one()
             if bucket.status != "active":
@@ -360,9 +350,7 @@ class WalletService:
                     .order_by(*_BUCKET_ORDER)
                 )
             ).all()
-        buckets = [
-            BucketView(r.bucket_id, r.source, r.tokens_granted - r.tokens_used, r.expires_at) for r in rows
-        ]
+        buckets = [BucketView(r.bucket_id, r.source, r.tokens_granted - r.tokens_used, r.expires_at) for r in rows]
         if wallet is None:
             return Balance(org_id, 0, 0, buckets)
         return Balance(org_id, wallet.tokens_available, wallet.tokens_reserved, buckets)
@@ -412,9 +400,7 @@ class WalletService:
     async def _lock_held(self, conn: AsyncConnection, reservation_id: uuid.UUID):
         return (
             await conn.execute(
-                select(chat_reservations)
-                .where(chat_reservations.c.reservation_id == reservation_id)
-                .with_for_update()
+                select(chat_reservations).where(chat_reservations.c.reservation_id == reservation_id).with_for_update()
             )
         ).one()
 
@@ -578,12 +564,16 @@ class WalletService:
         now = self.clock()
         async with self.engine.connect() as conn:
             ids = (
-                await conn.execute(
-                    select(chat_reservations.c.reservation_id).where(
-                        chat_reservations.c.status == "held", chat_reservations.c.expires_at <= now
+                (
+                    await conn.execute(
+                        select(chat_reservations.c.reservation_id).where(
+                            chat_reservations.c.status == "held", chat_reservations.c.expires_at <= now
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         count = 0
         for rid in ids:
             async with self.engine.begin() as conn:
@@ -596,9 +586,7 @@ class WalletService:
                     .values(tokens_reserved=chat_wallets.c.tokens_reserved - res.tokens_reserved)
                 )
                 await conn.execute(
-                    update(chat_reservations)
-                    .where(chat_reservations.c.reservation_id == rid)
-                    .values(status="expired")
+                    update(chat_reservations).where(chat_reservations.c.reservation_id == rid).values(status="expired")
                 )
                 count += 1
         return count
@@ -620,9 +608,7 @@ class WalletService:
         for bucket_id, org_id in rows:
             async with self.engine.begin() as conn:
                 wallet = (
-                    await conn.execute(
-                        select(chat_wallets).where(chat_wallets.c.org_id == org_id).with_for_update()
-                    )
+                    await conn.execute(select(chat_wallets).where(chat_wallets.c.org_id == org_id).with_for_update())
                 ).one()
                 b = (
                     await conn.execute(
@@ -706,9 +692,7 @@ class WalletService:
     async def check_invariant(self, org_id: uuid.UUID) -> bool:
         async with self.engine.connect() as conn:
             available = (
-                await conn.execute(
-                    select(chat_wallets.c.tokens_available).where(chat_wallets.c.org_id == org_id)
-                )
+                await conn.execute(select(chat_wallets.c.tokens_available).where(chat_wallets.c.org_id == org_id))
             ).scalar_one_or_none() or 0
             remaining = (
                 await conn.execute(
@@ -716,9 +700,7 @@ class WalletService:
                         func.coalesce(
                             func.sum(chat_credit_buckets.c.tokens_granted - chat_credit_buckets.c.tokens_used), 0
                         )
-                    ).where(
-                        and_(chat_credit_buckets.c.org_id == org_id, chat_credit_buckets.c.status == "active")
-                    )
+                    ).where(and_(chat_credit_buckets.c.org_id == org_id, chat_credit_buckets.c.status == "active"))
                 )
             ).scalar_one()
         return int(available) == int(remaining)

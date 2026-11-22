@@ -7,9 +7,9 @@ ceilings, shadow billing, refusal handling, client-disconnect settlement, versio
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -191,15 +191,24 @@ class ChatEngine:
         if mode == "live":
             output_budget = min(output_budget, balance.spendable - turn.billable_input)
         if output_budget < s.min_useful_output:
-            code = "insufficient_tokens" if mode == "live" and balance.spendable < daily_cap - used_today \
+            code = (
+                "insufficient_tokens"
+                if mode == "live" and balance.spendable < daily_cap - used_today
                 else "daily_limit_reached"
-            msg = "You've used all your tokens." if code == "insufficient_tokens" else \
-                "Your organisation has reached today's assistant limit."
+            )
+            msg = (
+                "You've used all your tokens."
+                if code == "insufficient_tokens"
+                else "Your organisation has reached today's assistant limit."
+            )
             yield error_event(code, msg)
             return
         if mode == "live":
             turn.reservation = await self.wallet.reserve(
-                principal.org_id, principal.user_id, conversation_id, turn.message_id,
+                principal.org_id,
+                principal.user_id,
+                conversation_id,
+                turn.message_id,
                 turn.billable_input + output_budget,
             )
             if turn.reservation is None:
@@ -286,8 +295,9 @@ class ChatEngine:
 
             refusal = turn.visible.strip().startswith(REFUSAL_SENTENCE)
             charge = not (refusal and not s.bill_refusals)
-            charged = await self._finalise(principal, org, conversation_id, turn, charge,
-                                           "refusal" if refusal else None)
+            charged = await self._finalise(
+                principal, org, conversation_id, turn, charge, "refusal" if refusal else None
+            )
             turn.finished = True
             await self._save_assistant(conversation_id, turn, charged, tool_records)
             balance = await self.wallet.get_balance(principal.org_id)
@@ -317,9 +327,7 @@ class ChatEngine:
             yield error_event("internal_error", "Something went wrong. You were not charged for this message.")
 
     async def _on_disconnect(self, principal, org, conversation_id, turn: _Turn, tool_records) -> None:
-        charged = await self._finalise(
-            principal, org, conversation_id, turn, bool(turn.visible), "client_disconnect"
-        )
+        charged = await self._finalise(principal, org, conversation_id, turn, bool(turn.visible), "client_disconnect")
         await self._save_assistant(conversation_id, turn, charged, tool_records)
 
     async def _save_assistant(self, conversation_id, turn: _Turn, charged: int, tool_records) -> None:

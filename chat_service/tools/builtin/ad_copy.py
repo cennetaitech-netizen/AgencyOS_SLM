@@ -80,7 +80,7 @@ VALIDATE_AD_COPY = Tool(
             "format": {"type": "string", "description": "e.g. responsive_search_ad, single_image_or_video"},
             "fields": {
                 "type": "object",
-                "description": "Field name → list of texts, e.g. {\"headline\": [\"...\"], \"description\": [\"...\"]}",
+                "description": 'Field name → list of texts, e.g. {"headline": ["..."], "description": ["..."]}',
                 "additionalProperties": {"type": "array", "items": {"type": "string"}},
             },
         },

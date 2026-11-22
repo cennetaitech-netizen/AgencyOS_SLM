@@ -1,16 +1,74 @@
 # AgencyOS — Media Campaign SLM
 
-A domain-specialised small language model (SLM) and SaaS product for media agencies and advertisers. It covers the campaign lifecycle from brief to media plan to creative to launch QA to optimisation to reporting.
+A chat assistant for the AgencyOS product, focused only on media campaigns. Clients chat with **our own small language model (SLM)**, which reads (and, from Phase 9, acts on, with confirmation) their campaign data. They're **billed by token consumption** with free and paid caps.
 
-- **Combined release plan (M1 + M2 together, ~14–16 weeks):** [docs/COMBINED_RELEASE_PLAN.md](docs/COMBINED_RELEASE_PLAN.md): parallel workstreams, gates, and what replaces the pilot.
-- **Implementation guide for the AI coding agent:** [docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md): Release 1.0, Phases 0–12, from pilot (M1) to commercial launch (M2), with checkpoints.
-- **Business readiness drafts (run in parallel, sign-off required for launch):**
-  - [docs/business/GOVERNANCE_AND_PRICING.md](docs/business/GOVERNANCE_AND_PRICING.md): owners (RACI), decision log, budget, pricing model
-  - [docs/business/LEGAL_AND_FINANCE_DRAFTS.md](docs/business/LEGAL_AND_FINANCE_DRAFTS.md): terms clauses, consent, disclaimer, DPA checklist, refund policy, tax invoice checklist, revenue recognition
-  - [docs/business/SUPPORT_PILOT_LAUNCH_KIT.md](docs/business/SUPPORT_PILOT_LAUNCH_KIT.md): FAQ, runbooks, incidents, pilot plan, launch kit
-- **Gap review before development:** [docs/GAP_REVIEW.md](docs/GAP_REVIEW.md): what was missing, priorities, and owners.
-- **Lean MVP (start here):** [docs/LEAN_MVP.md](docs/LEAN_MVP.md): what to build first, with only 8 essential guardrails.
-- **Full target design:** [docs/CHAT_ENGINE_SLM_PLAN.md](docs/CHAT_ENGINE_SLM_PLAN.md): chat engine on our own media-campaign SLM for the existing product, billed by token consumption.
-- **Prerequisites, guardrails, challenges:** [docs/BUILD_READINESS.md](docs/BUILD_READINESS.md)
-- **Free/paid token caps and invoicing:** [docs/TOKEN_CAPS_AND_INVOICING.md](docs/TOKEN_CAPS_AND_INVOICING.md)
-- **Background:** [docs/PRODUCT_BLUEPRINT.md](docs/PRODUCT_BLUEPRINT.md): the original build-from-scratch blueprint (data strategy, compliance, go-to-market).
+**Status:** foundation built and tested. See [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) for what's done, what's blocked on inputs, and what's next.
+
+---
+
+## Run it locally
+
+Requirements: Python 3.12+, PostgreSQL 15+, and an OpenAI-compatible model endpoint (e.g. a local Ollama or vLLM, or a managed host).
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+```
+
+```bash
+pip install -e ".[dev]"
+```
+
+```bash
+createdb chat_dev && cp .env.example .env
+```
+
+```bash
+alembic upgrade head
+```
+
+```bash
+uvicorn chat_service.api.app:create_app --factory --reload --port 8090
+```
+
+API docs: http://localhost:8090/docs. In dev mode, requests authenticate with the headers `X-Dev-User-Id`, `X-Dev-Org-Id` and `X-Dev-Roles`. An `agencyos_staff` user enables an org with `PUT /chat/admin/orgs/{org_id}/settings`.
+
+Scheduled jobs (expiry, refunds, retention, wallet checks), every 5 minutes:
+
+```bash
+python -m chat_service.jobs
+```
+
+Tests (need a `chat_test` database; see `tests/conftest.py`):
+
+```bash
+pytest -q
+```
+
+Model bake-off for gate G2: copy `evals/models.example.json`, fill in the candidate hosts, then:
+
+```bash
+python -m chat_service.evals.bakeoff --models evals/models.json
+```
+
+## Code map
+| Path | What |
+|---|---|
+| `chat_service/db/schema.py` | Database schema: the shared contract (M1 + M2 tables) |
+| `chat_service/billing/wallet.py` | Token wallet: free trial, packs, reserve/settle/release, shadow mode, expiry, refunds |
+| `chat_service/billing/tokenizer.py` | Fixed, versioned billable-token counting |
+| `chat_service/billing/payments.py` | Payment provider interface (dev provider; Stripe/Razorpay later) |
+| `chat_service/engine/agent.py` | Chat engine: gates → reserve → model ⇄ tools loop → settle |
+| `chat_service/engine/prompts/` | Versioned system prompts |
+| `chat_service/tools/` | Tool registry, `media_math`, `validate_ad_copy`, product read tools (+ mock product) |
+| `chat_service/llm/` | OpenAI-compatible streaming client with fallback; scripted fake model |
+| `chat_service/api/` | FastAPI app, auth providers |
+| `chat_service/evals/bakeoff.py` | Gate G2 model bake-off |
+| `migrations/` | Alembic migrations |
+
+## Planning documents
+- **Build status:** [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) · **Shared contracts:** [docs/contracts/CONTRACTS.md](docs/contracts/CONTRACTS.md)
+- **Combined release plan (M1 + M2 together, ~14–16 weeks):** [docs/COMBINED_RELEASE_PLAN.md](docs/COMBINED_RELEASE_PLAN.md)
+- **Implementation guide (Phases 0–12):** [docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md)
+- **Business readiness drafts:** [governance & pricing](docs/business/GOVERNANCE_AND_PRICING.md) · [legal & finance](docs/business/LEGAL_AND_FINANCE_DRAFTS.md) · [support, pilot & launch](docs/business/SUPPORT_PILOT_LAUNCH_KIT.md)
+- **Gap review:** [docs/GAP_REVIEW.md](docs/GAP_REVIEW.md)
+- Background: [lean MVP](docs/LEAN_MVP.md) · [chat engine design](docs/CHAT_ENGINE_SLM_PLAN.md) · [prerequisites & guardrails](docs/BUILD_READINESS.md) · [token caps & invoicing](docs/TOKEN_CAPS_AND_INVOICING.md) · [original blueprint](docs/PRODUCT_BLUEPRINT.md)

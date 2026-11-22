@@ -63,8 +63,9 @@ async def usage_rows(engine):
 
 
 async def test_plain_answer_is_charged_and_streamed(engine, settings, clock, principal):
-    chat, model, conv = await make_engine(engine, settings, clock, [FakeTurn("Hello Priya, how can I help?")],
-                                          principal)
+    chat, model, conv = await make_engine(
+        engine, settings, clock, [FakeTurn("Hello Priya, how can I help?")], principal
+    )
     events = await collect(chat, principal, conv, "hi there")
     assert names(events)[0] == "message.start" and names(events)[-1] == "message.end"
     text = "".join(e["data"]["text"] for e in events if e["event"] == "token")
@@ -78,9 +79,19 @@ async def test_plain_answer_is_charged_and_streamed(engine, settings, clock, pri
 
 async def test_tool_round_then_answer_records_tool_calls(engine, settings, clock, principal):
     turns = [
-        FakeTurn(tool_calls=[("get_campaign_performance",
-                              {"client_id": "cl_acme", "date_from": "2026-11-15", "date_to": "2026-11-21",
-                               "breakdown": "platform"})]),
+        FakeTurn(
+            tool_calls=[
+                (
+                    "get_campaign_performance",
+                    {
+                        "client_id": "cl_acme",
+                        "date_from": "2026-11-15",
+                        "date_to": "2026-11-21",
+                        "breakdown": "platform",
+                    },
+                )
+            ]
+        ),
         FakeTurn("Acme spent across Google and Meta last week."),
     ]
     chat, model, conv = await make_engine(engine, settings, clock, turns, principal)
@@ -95,8 +106,10 @@ async def test_tool_round_then_answer_records_tool_calls(engine, settings, clock
 
 
 async def test_invalid_tool_args_are_not_executed(engine, settings, clock, principal):
-    turns = [FakeTurn(tool_calls=[("get_campaign_performance", {"client_id": "cl_acme"})]),
-             FakeTurn("I need a date range.")]
+    turns = [
+        FakeTurn(tool_calls=[("get_campaign_performance", {"client_id": "cl_acme"})]),
+        FakeTurn("I need a date range."),
+    ]
     chat, model, conv = await make_engine(engine, settings, clock, turns, principal)
     events = await collect(chat, principal, conv, "performance?")
     tool_end = next(e for e in events if e["event"] == "tool.end")
@@ -114,8 +127,9 @@ async def test_max_steps_forces_final_answer_without_tools(engine, settings, clo
 
 
 async def test_history_is_included_on_next_turn(engine, settings, clock, principal):
-    chat, model, conv = await make_engine(engine, settings, clock, [FakeTurn("First answer."),
-                                                                    FakeTurn("Second answer.")], principal)
+    chat, model, conv = await make_engine(
+        engine, settings, clock, [FakeTurn("First answer."), FakeTurn("Second answer.")], principal
+    )
     await collect(chat, principal, conv, "first question")
     await collect(chat, principal, conv, "second question")
     roles = [(m["role"], m["content"]) for m in model.requests[1]["messages"][1:]]
@@ -126,12 +140,18 @@ async def test_history_is_included_on_next_turn(engine, settings, clock, princip
 
 
 async def test_model_error_mid_stream_is_not_charged(engine, settings, clock, principal):
-    chat, _, conv = await make_engine(engine, settings, clock, [FakeTurn("partial text", fail_after_text=True)],
-                                      principal)
+    chat, _, conv = await make_engine(
+        engine, settings, clock, [FakeTurn("partial text", fail_after_text=True)], principal
+    )
     events = await collect(chat, principal, conv, "hello")
-    assert events[-1] == {"event": "error", "data": {"code": "internal_error",
-                                                     "message": "Something went wrong. You were not charged for this message.",
-                                                     "charged": False}}
+    assert events[-1] == {
+        "event": "error",
+        "data": {
+            "code": "internal_error",
+            "message": "Something went wrong. You were not charged for this message.",
+            "charged": False,
+        },
+    }
     bal = await chat.wallet.get_balance(principal.org_id)
     assert bal.tokens_available == settings.free_trial_tokens and bal.tokens_reserved == 0
     (row,) = await usage_rows(engine)
@@ -149,8 +169,14 @@ async def test_refusal_not_charged_by_default(engine, settings, clock, principal
 
 
 async def test_fallback_host_used_when_primary_fails_before_first_token(engine, settings, clock, principal):
-    chat, _, conv = await make_engine(engine, settings, clock, [FakeTurn(fail_before_first_token=True)],
-                                      principal, fallback_turns=[FakeTurn("Answer from fallback.")])
+    chat, _, conv = await make_engine(
+        engine,
+        settings,
+        clock,
+        [FakeTurn(fail_before_first_token=True)],
+        principal,
+        fallback_turns=[FakeTurn("Answer from fallback.")],
+    )
     events = await collect(chat, principal, conv, "hello")
     assert events[-1]["event"] == "message.end"
     (row,) = await usage_rows(engine)
@@ -158,8 +184,9 @@ async def test_fallback_host_used_when_primary_fails_before_first_token(engine, 
 
 
 async def test_client_disconnect_charges_only_visible_text(engine, settings, clock, principal):
-    chat, _, conv = await make_engine(engine, settings, clock,
-                                      [FakeTurn("one two three four five six seven eight")], principal)
+    chat, _, conv = await make_engine(
+        engine, settings, clock, [FakeTurn("one two three four five six seven eight")], principal
+    )
     gen = chat.handle_message(principal, conv, "hello")
     seen = []
     async for ev in gen:
@@ -181,8 +208,12 @@ async def test_zero_balance_blocks_without_calling_model(engine, settings, clock
     settings.free_trial_tokens = 100  # below min useful output
     chat, model, conv = await make_engine(engine, settings, clock, [FakeTurn("never")], principal)
     events = await collect(chat, principal, conv, "hello")
-    assert events == [{"event": "error", "data": {"code": "insufficient_tokens",
-                                                  "message": "You've used all your tokens.", "charged": False}}]
+    assert events == [
+        {
+            "event": "error",
+            "data": {"code": "insufficient_tokens", "message": "You've used all your tokens.", "charged": False},
+        }
+    ]
     assert model.requests == []
 
 
@@ -202,8 +233,7 @@ async def test_global_kill_switch(engine, settings, clock, principal):
 async def test_free_trial_daily_ceiling(engine, settings, clock, principal):
     settings.free_trial_daily_max_tokens = 300
     settings.min_useful_output = 50
-    chat, _, conv = await make_engine(engine, settings, clock,
-                                      [FakeTurn("word " * 400), FakeTurn("never")], principal)
+    chat, _, conv = await make_engine(engine, settings, clock, [FakeTurn("word " * 400), FakeTurn("never")], principal)
     await collect(chat, principal, conv, "first")
     events = await collect(chat, principal, conv, "second")
     assert events[0]["data"]["code"] == "daily_limit_reached"
@@ -226,8 +256,9 @@ async def test_other_users_conversation_not_accessible(engine, settings, clock, 
 
 
 async def test_shadow_mode_counts_but_never_debits(engine, settings, clock, principal):
-    chat, _, conv = await make_engine(engine, settings, clock, [FakeTurn("Shadow answer here.")], principal,
-                                      mode="shadow")
+    chat, _, conv = await make_engine(
+        engine, settings, clock, [FakeTurn("Shadow answer here.")], principal, mode="shadow"
+    )
     events = await collect(chat, principal, conv, "hello")
     end = events[-1]["data"]
     assert end["billing_mode"] == "shadow" and end["tokens_charged"] > 0

@@ -78,18 +78,46 @@ class MockProductAPI:
             {"client_id": "cl_nova", "name": "Nova Fitness"},
         ]
         self.campaigns = [
-            {"campaign_id": "cmp_101", "client_id": "cl_acme", "name": "Acme Diwali Search",
-             "platform": "google_ads", "status": "active", "budget": 300000, "flight_start": "2026-11-01",
-             "flight_end": "2026-11-30"},
-            {"campaign_id": "cmp_102", "client_id": "cl_acme", "name": "Acme Diwali Social",
-             "platform": "meta", "status": "active", "budget": 250000, "flight_start": "2026-11-01",
-             "flight_end": "2026-11-30"},
-            {"campaign_id": "cmp_201", "client_id": "cl_nova", "name": "Nova New Year Leads",
-             "platform": "meta", "status": "active", "budget": 120000, "flight_start": "2026-11-15",
-             "flight_end": "2026-12-31"},
-            {"campaign_id": "cmp_202", "client_id": "cl_nova", "name": "Nova Brand Search",
-             "platform": "google_ads", "status": "paused", "budget": 60000, "flight_start": "2026-10-01",
-             "flight_end": "2026-12-31"},
+            {
+                "campaign_id": "cmp_101",
+                "client_id": "cl_acme",
+                "name": "Acme Diwali Search",
+                "platform": "google_ads",
+                "status": "active",
+                "budget": 300000,
+                "flight_start": "2026-11-01",
+                "flight_end": "2026-11-30",
+            },
+            {
+                "campaign_id": "cmp_102",
+                "client_id": "cl_acme",
+                "name": "Acme Diwali Social",
+                "platform": "meta",
+                "status": "active",
+                "budget": 250000,
+                "flight_start": "2026-11-01",
+                "flight_end": "2026-11-30",
+            },
+            {
+                "campaign_id": "cmp_201",
+                "client_id": "cl_nova",
+                "name": "Nova New Year Leads",
+                "platform": "meta",
+                "status": "active",
+                "budget": 120000,
+                "flight_start": "2026-11-15",
+                "flight_end": "2026-12-31",
+            },
+            {
+                "campaign_id": "cmp_202",
+                "client_id": "cl_nova",
+                "name": "Nova Brand Search",
+                "platform": "google_ads",
+                "status": "paused",
+                "budget": 60000,
+                "flight_start": "2026-10-01",
+                "flight_end": "2026-12-31",
+            },
         ]
         self.currency = "INR"
 
@@ -101,8 +129,13 @@ class MockProductAPI:
         spend = round(clicks * rnd.uniform(6, 18), 2)
         conversions = int(clicks * rnd.uniform(0.02, 0.08))
         revenue = round(conversions * rnd.uniform(400, 1200), 2)
-        return {"impressions": impressions, "clicks": clicks, "spend": spend,
-                "conversions": conversions, "revenue": revenue}
+        return {
+            "impressions": impressions,
+            "clicks": clicks,
+            "spend": spend,
+            "conversions": conversions,
+            "revenue": revenue,
+        }
 
     def _campaign(self, campaign_id: str) -> dict[str, Any]:
         for c in self.campaigns:
@@ -115,9 +148,12 @@ class MockProductAPI:
         if tool_name == "list_clients":
             return {"data_as_of": as_of, "rows": self.clients}
         if tool_name == "list_campaigns":
-            rows = [c for c in self.campaigns
-                    if (not params.get("client_id") or c["client_id"] == params["client_id"])
-                    and (not params.get("status") or c["status"] == params["status"])]
+            rows = [
+                c
+                for c in self.campaigns
+                if (not params.get("client_id") or c["client_id"] == params["client_id"])
+                and (not params.get("status") or c["status"] == params["status"])
+            ]
             return {"data_as_of": as_of, "currency": self.currency, "rows": rows}
         if tool_name == "get_campaign_performance":
             return self._performance(params, as_of)
@@ -126,14 +162,33 @@ class MockProductAPI:
             start = date.fromisoformat(c["flight_start"])
             end = date.fromisoformat(c["flight_end"])
             last = min(self.today - timedelta(days=1), end)
-            spend = sum(self._daily(c["campaign_id"], start + timedelta(days=i))["spend"]
-                        for i in range((last - start).days + 1)) if last >= start else 0.0
-            return {"data_as_of": as_of, "currency": self.currency, "campaign_id": c["campaign_id"],
-                    "name": c["name"], "budget": c["budget"], "spend_to_date": round(spend, 2),
-                    "days_elapsed": max(0, (last - start).days + 1), "total_days": (end - start).days + 1}
+            spend = (
+                sum(
+                    self._daily(c["campaign_id"], start + timedelta(days=i))["spend"]
+                    for i in range((last - start).days + 1)
+                )
+                if last >= start
+                else 0.0
+            )
+            return {
+                "data_as_of": as_of,
+                "currency": self.currency,
+                "campaign_id": c["campaign_id"],
+                "name": c["name"],
+                "budget": c["budget"],
+                "spend_to_date": round(spend, 2),
+                "days_elapsed": max(0, (last - start).days + 1),
+                "total_days": (end - start).days + 1,
+            }
         if tool_name == "search_help_docs":
-            return {"rows": [{"title": "Changing a campaign budget",
-                              "steps": "Campaigns → select campaign → Budget → Edit → Save"}]}
+            return {
+                "rows": [
+                    {
+                        "title": "Changing a campaign budget",
+                        "steps": "Campaigns → select campaign → Budget → Edit → Save",
+                    }
+                ]
+            }
         raise ToolInputError(f"unsupported tool {tool_name}")
 
     def _performance(self, params: dict[str, Any], as_of: str) -> dict[str, Any]:
@@ -161,9 +216,14 @@ class MockProductAPI:
                         groups[key][k] += v
             day += timedelta(days=1)
         rows = [{breakdown: k, **_derived(v)} for k, v in groups.items()][:20]
-        return {"data_as_of": as_of, "currency": self.currency,
-                "date_range": {"from": params["date_from"], "to": params["date_to"]},
-                "scope": [c["name"] for c in camps], "totals": _derived(totals), "rows": rows}
+        return {
+            "data_as_of": as_of,
+            "currency": self.currency,
+            "date_range": {"from": params["date_from"], "to": params["date_to"]},
+            "scope": [c["name"] for c in camps],
+            "totals": _derived(totals),
+            "rows": rows,
+        }
 
 
 def _derived(m: dict[str, float]) -> dict[str, float]:
@@ -189,13 +249,17 @@ def product_tools(api: ProductAPI) -> list[Tool]:
     date_prop = {"type": "string", "format": "date", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
     return [
         Tool(
-            name="list_clients", label="Looking up clients", group="planning",
+            name="list_clients",
+            label="Looking up clients",
+            group="planning",
             description="List the clients/brands this user can access, with their IDs.",
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=handler("list_clients"),
         ),
         Tool(
-            name="list_campaigns", label="Looking up campaigns", group="planning",
+            name="list_campaigns",
+            label="Looking up campaigns",
+            group="planning",
             description="List campaigns (ID, name, platform, status, budget, flight dates), optionally for one client.",
             parameters={
                 "type": "object",
@@ -208,7 +272,9 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             handler=handler("list_campaigns"),
         ),
         Tool(
-            name="get_campaign_performance", label="Looking up campaign performance", group="reporting",
+            name="get_campaign_performance",
+            label="Looking up campaign performance",
+            group="reporting",
             description=(
                 "Performance for one campaign or all campaigns of a client over a date range: spend, "
                 "impressions, clicks, conversions, revenue, CTR, CPC, CPM, CPA, ROAS. Optional breakdown."
@@ -228,9 +294,11 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             handler=handler("get_campaign_performance"),
         ),
         Tool(
-            name="get_budget_pacing", label="Checking budget pacing", group="budgets",
+            name="get_budget_pacing",
+            label="Checking budget pacing",
+            group="budgets",
             description="Budget, spend to date, days elapsed and total flight days for a campaign. "
-                        "Use media_math pacing_projection on the result to project end-of-flight spend.",
+            "Use media_math pacing_projection on the result to project end-of-flight spend.",
             parameters={
                 "type": "object",
                 "properties": {"campaign_id": {"type": "string"}},
@@ -240,7 +308,9 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             handler=handler("get_budget_pacing"),
         ),
         Tool(
-            name="search_help_docs", label="Searching help articles", group="help",
+            name="search_help_docs",
+            label="Searching help articles",
+            group="help",
             description="Search AgencyOS help articles for how-to questions about using the product.",
             parameters={
                 "type": "object",

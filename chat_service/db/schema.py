@@ -75,9 +75,7 @@ chat_credit_buckets = Table(
     Column("payment_id", UUID(as_uuid=True), nullable=True),
     Column("granted_by", UUID(as_uuid=True), nullable=True),
     Column("note", Text, nullable=True),
-    CheckConstraint(
-        "source IN ('free_trial','plan_monthly','pack','goodwill')", name="source_valid"
-    ),
+    CheckConstraint("source IN ('free_trial','plan_monthly','pack','goodwill')", name="source_valid"),
     CheckConstraint("status IN ('active','exhausted','expired','reversed')", name="status_valid"),
     CheckConstraint("tokens_granted > 0", name="granted_positive"),
     CheckConstraint("tokens_used >= 0 AND tokens_used <= tokens_granted", name="used_within_granted"),
@@ -137,9 +135,7 @@ chat_bucket_debits = Table(
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("message_id", UUID(as_uuid=True), nullable=False, index=True),
-    Column(
-        "bucket_id", UUID(as_uuid=True), ForeignKey("chat_credit_buckets.bucket_id"), nullable=False
-    ),
+    Column("bucket_id", UUID(as_uuid=True), ForeignKey("chat_credit_buckets.bucket_id"), nullable=False),
     Column("tokens", BigInteger, nullable=False),
     CheckConstraint("tokens > 0", name="tokens_positive"),
 )

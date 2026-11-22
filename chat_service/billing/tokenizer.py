@@ -53,7 +53,5 @@ def build_tokenizer(settings: Settings) -> BillingTokenizer:
     if settings.billing_tokenizer_path:
         return FileTokenizer(settings.billing_tokenizer_path, settings.billing_tokenizer_version)
     if settings.env == "production":
-        raise RuntimeError(
-            "CHAT_BILLING_TOKENIZER_PATH must point to the pinned billing tokenizer file in production"
-        )
+        raise RuntimeError("CHAT_BILLING_TOKENIZER_PATH must point to the pinned billing tokenizer file in production")
     return DevRegexTokenizer()

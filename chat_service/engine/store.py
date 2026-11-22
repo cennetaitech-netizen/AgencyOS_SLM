@@ -39,13 +39,18 @@ class OrgSettingsStore:
             row = (await conn.execute(select(chat_org_settings).where(chat_org_settings.c.org_id == org_id))).first()
         if row is None:
             return OrgSettings(org_id, False, None, "UTC", "USD", False)
-        return OrgSettings(
-            org_id, row.chat_enabled, row.billing_mode, row.timezone, row.currency, row.training_consent
-        )
+        return OrgSettings(org_id, row.chat_enabled, row.billing_mode, row.timezone, row.currency, row.training_consent)
 
     async def upsert(self, org_id: uuid.UUID, **values: Any) -> OrgSettings:
-        allowed = {"chat_enabled", "billing_mode", "timezone", "currency", "training_consent",
-                   "training_consent_at", "training_consent_by"}
+        allowed = {
+            "chat_enabled",
+            "billing_mode",
+            "timezone",
+            "currency",
+            "training_consent",
+            "training_consent_at",
+            "training_consent_by",
+        }
         values = {k: v for k, v in values.items() if k in allowed}
         async with self.engine.begin() as conn:
             stmt = pg_insert(chat_org_settings).values(org_id=org_id, **values)
@@ -180,8 +185,12 @@ class ConversationStore:
         async with self.engine.connect() as conn:
             return (
                 await conn.execute(
-                    select(chat_messages.c.id, chat_messages.c.role, chat_conversations.c.org_id,
-                           chat_conversations.c.user_id)
+                    select(
+                        chat_messages.c.id,
+                        chat_messages.c.role,
+                        chat_conversations.c.org_id,
+                        chat_conversations.c.user_id,
+                    )
                     .join(chat_conversations, chat_conversations.c.id == chat_messages.c.conversation_id)
                     .where(chat_messages.c.id == message_id)
                 )
@@ -193,8 +202,14 @@ class ConversationStore:
         async with self.engine.begin() as conn:
             await conn.execute(
                 pg_insert(chat_feedback)
-                .values(id=uuid.uuid4(), message_id=message_id, user_id=user_id, rating=rating, reason=reason,
-                        comment=comment)
+                .values(
+                    id=uuid.uuid4(),
+                    message_id=message_id,
+                    user_id=user_id,
+                    rating=rating,
+                    reason=reason,
+                    comment=comment,
+                )
                 .on_conflict_do_update(
                     constraint="uq_chat_feedback_message_user",
                     set_={"rating": rating, "reason": reason, "comment": comment},

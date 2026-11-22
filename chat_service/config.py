@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     product_adapter: Literal["http", "mock"] = "mock"
     auth_provider: Literal["dev", "product"] = "dev"
 
+    # Payments (token packs)
+    payment_provider: Literal["dev"] = "dev"  # stripe / razorpay adapters added once finance decides (D9)
+    payment_webhook_secret: str = Field(default="dev-webhook-secret", repr=False)
+    app_base_url: str = "http://localhost:3000"
+
+    # Roles (names as the product issues them; confirm in Phase 0)
+    org_admin_role: str = "org_admin"
+    staff_role: str = "agencyos_staff"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,5 @@
+[
+  {"label": "candidate-a (e.g. Qwen3-8B on host X)", "base_url": "https://HOST_X/v1", "model": "MODEL_ID", "api_key_env": "HOST_X_API_KEY"},
+  {"label": "candidate-b (e.g. Llama-3.1-8B on host Y)", "base_url": "https://HOST_Y/v1", "model": "MODEL_ID", "api_key_env": "HOST_Y_API_KEY"},
+  {"label": "local vLLM / Ollama", "base_url": "http://localhost:11434/v1", "model": "qwen3:8b", "api_key_env": ""}
+]
