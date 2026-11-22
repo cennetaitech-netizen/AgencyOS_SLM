@@ -7,7 +7,7 @@
 > - **M1, Pilot (Phases 0–8):** read-only chat, prepaid wallet, free trial, shadow billing, 5 pilot orgs. *Not sold.*
 > - **M2, Commercial launch (Phases 9–12):** chat actions with confirmation, subscription plans with caps/overage/monthly invoicing, fine-tuned media-campaign SLM, launch hardening. **Sold only after M2's go/no-go.**
 > - **Business readiness** runs in parallel. Drafts are in [`business/`](business/), and M2 can't launch until they're signed off.
-> **Background docs (read for context, don't implement beyond Stage 1):** `LEAN_MVP.md`, `CHAT_ENGINE_SLM_PLAN.md`, `TOKEN_CAPS_AND_INVOICING.md`, `BUILD_READINESS.md`.
+> **Background docs (read for context; this guide takes precedence where they differ):** `LEAN_MVP.md`, `CHAT_ENGINE_SLM_PLAN.md`, `TOKEN_CAPS_AND_INVOICING.md`, `BUILD_READINESS.md`.
 
 ---
 
@@ -74,7 +74,7 @@
 
 ---
 
-## 3. Target architecture (Stage 1)
+## 3. Target architecture (M1 shown; Phases 9–11 add actions, billing plans and the fine-tuned model)
 
 ```
 AgencyOS Web App
@@ -142,7 +142,7 @@ Chat Service  (module inside the product backend, OR a separate service if the p
    - Stack summary: languages, frameworks, DB, migrations, test setup, how to run locally.
    - Auth: how a request is authenticated, how to get `user_id`, `org_id` and roles, and how a backend component can validate a user token.
    - **API/service inventory:** every *read* operation relevant to media campaigns (clients/brands, campaigns, ad sets/line items, performance metrics, budgets & pacing, creatives, audiences, benchmarks, plans, reports), with path/function, parameters, response shape and permission checks.
-   - **Proposed Stage 1 tool list (10–15 tools)** using the format in Section 5.3, each mapped to a real operation. Expected candidates, **only where they exist**: `list_clients`, `list_campaigns`, `get_campaign_details`, `get_campaign_performance`, `compare_periods`, `get_top_performers`, `get_budget_pacing`, `list_creatives`, `get_audiences`, `get_benchmarks`, `list_media_plans`, `get_media_plan`.
+   - **Proposed M1 read-only tool list (10–15 tools)** using the format in Section 5.3, each mapped to a real operation. Expected candidates, **only where they exist**: `list_clients`, `list_campaigns`, `get_campaign_details`, `get_campaign_performance`, `compare_periods`, `get_top_performers`, `get_budget_pacing`, `list_creatives`, `get_audiences`, `get_benchmarks`, `list_media_plans`, `get_media_plan`.
    - **Gaps:** useful capabilities with no existing read API (don't build them now).
    - Recommendation: chat as a module inside the backend vs a separate service, with reasons.
    - Where the product stores each org's **timezone, currency and fiscal settings**, and how users with access to **multiple clients/brands** are scoped.
@@ -512,7 +512,7 @@ returns: >
 ```
 
 Registry rules:
-- Reject registration if `read_only` isn't `true` (Stage 1).
+- Phases 0–8: reject registration if `read_only` isn't `true`. From Phase 9: write tools must declare `risk_tier`, `reversible` and `preview_tool`, and are only executable through the confirmation flow.
 - Expose to the model only `name`, `description` and `parameters`. Keep descriptions short and specific; they cost tokens on every call.
 - Each handler signature: `handler(ctx, args) -> dict`, where `ctx` carries `user_id`, `org_id`, the user's credential for product calls, and `request_id`.
 
@@ -708,7 +708,7 @@ CREATE TABLE chat_payments (
 - **Shadow mode:** skip `reserve`/`settle`/`release` on the wallet. Write the usage event with `status = 'shadow'` and `tokens_charged` = the would-be charge.
 - **Invariant (checked by tests and a daily job):** `tokens_available == Σ(tokens_granted − tokens_used)` over active buckets.
 
-### 6.3 What is billable (Stage 1 policy)
+### 6.3 What is billable (Release 1.0 policy)
 - **Billable input** = the user's message text. **Billable output** = the assistant's visible reply text.
 - **Not billed** (priced into the token rate): system prompt, tool schemas, conversation history re-sent as context, tool results, intermediate tool-call outputs.
 - **Never billed:** failed or errored replies, timeouts, and refusals (when `CHAT_BILL_REFUSALS=false`).
