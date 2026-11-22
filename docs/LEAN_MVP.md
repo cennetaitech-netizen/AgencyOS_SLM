@@ -29,6 +29,8 @@ The guardrail list in [BUILD_READINESS.md](BUILD_READINESS.md) is the **end stat
 
 Everything else in BUILD_READINESS.md is added **only when the feature that needs it is added**.
 
+**Also required at launch:** protection for *our own* costs (global kill switch, daily token ceilings, model-host spend alerts) and the operational items in [GAP_REVIEW.md](GAP_REVIEW.md). These are configuration and plumbing, not extra chat guardrails.
+
 ---
 
 ## Staged roadmap
