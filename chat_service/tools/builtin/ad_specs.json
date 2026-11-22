@@ -1,0 +1,24 @@
+{
+  "_comment": "Human-maintained ad text limits. Verify against each platform's current specs before release and on every platform change. 'hard' = rejected by the platform; 'recommended' = may be truncated in display.",
+  "_last_reviewed": "TODO",
+  "google_ads": {
+    "responsive_search_ad": {
+      "headline": {"max": 30, "kind": "hard"},
+      "description": {"max": 90, "kind": "hard"},
+      "path": {"max": 15, "kind": "hard"}
+    },
+    "responsive_display_ad": {
+      "short_headline": {"max": 30, "kind": "hard"},
+      "long_headline": {"max": 90, "kind": "hard"},
+      "description": {"max": 90, "kind": "hard"},
+      "business_name": {"max": 25, "kind": "hard"}
+    }
+  },
+  "meta": {
+    "single_image_or_video": {
+      "primary_text": {"max": 125, "kind": "recommended"},
+      "headline": {"max": 40, "kind": "recommended"},
+      "description": {"max": 30, "kind": "recommended"}
+    }
+  }
+}
