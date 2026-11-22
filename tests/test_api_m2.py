@@ -83,6 +83,14 @@ async def test_action_flow_over_http(api, ids):
         "/chat/action-rules", json={"write_actions_enabled": True, "max_budget_change_pct": 10}, headers=admin
     )
     assert r.status_code == 200 and r.json()["write_actions_enabled"] is True
+    catalog = (await client.get("/chat/action-catalog", headers=admin)).json()["actions"]
+    assert {a["name"] for a in catalog} == {
+        "update_campaign_budget",
+        "pause_campaign",
+        "resume_campaign",
+        "rename_campaign",
+    }
+    assert (await client.get("/chat/action-catalog", headers=planner)).status_code == 403
 
     conv = (await client.post("/chat/conversations", headers=planner)).json()["id"]
     events = sse(

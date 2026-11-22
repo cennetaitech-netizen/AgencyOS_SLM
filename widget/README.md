@@ -13,6 +13,13 @@ React components that embed the assistant in the AgencyOS web app:
   - AI disclaimer, starter questions and Stop
   - keyboard and screen-reader support, dark mode, phone layout
 - `BillingPage`: balance by source, token packs (checkout), plan, invoices with usage CSV, and usage limits. Admin-only parts hide for other users.
+- `AdminPage`: settings for organisation admins (users without the admin role see a short "admins only" message):
+  - **Approvals**: changes waiting for a second approver, with before → after, Approve and apply, or Reject. You can't approve a change you requested or confirmed.
+  - **Chat actions**: switch chat actions on or off, budget safety limits (% and amount per action, second-approver threshold, daily limit), which actions are allowed, low-risk confirmation, and roles allowed per risk level.
+  - **Usage limits**: token limits for the organisation (per day or month, hard stop or warning only).
+  - **Plan & spend**: subscribe, upgrade (prorated now) or downgrade (from the next renewal), and the monthly overage spend limit.
+  - **Billing details**: legal name, address, tax ID and billing email used on invoices.
+  - **Data & privacy**: training-data consent.
 - `ChatApiClient`: the API client. Streaming uses `fetch` + `ReadableStream`, because `EventSource` can't send auth headers.
 
 ## Embed
@@ -27,7 +34,7 @@ const client = new ChatApiClient({
 
 <AssistantPanel client={client} onBuyTokens={() => navigate("/assistant/billing")} />;
 ```
-Restyle by overriding the `--aos-*` CSS variables on `.aos-panel` / `.aos-billing` to match the product's design system.
+Restyle by overriding the `--aos-*` CSS variables on `.aos-panel` / `.aos-billing` / `.aos-admin` to match the product's design system.
 
 ## Develop
 Start the chat service with `CHAT_AUTH_PROVIDER=dev` on port 8090 (see the repo README), then:

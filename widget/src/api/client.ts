@@ -4,7 +4,12 @@
  */
 import { readSSE } from "./sse";
 import type {
+  ActionCatalogItem,
   ActionProposal,
+  ActionRules,
+  BillingProfile,
+  OrgSettings,
+  Plan,
   ActionView,
   Cap,
   Conversation,
@@ -137,5 +142,57 @@ export class ChatApiClient {
   }
   listCaps() {
     return this.request<{ caps: Cap[] }>("GET", "/chat/caps").then((r) => r.caps);
+  }
+
+  // ---------------------------------------------------------------- org admin
+
+  setCap(cap: Omit<Cap, "cap_id">) {
+    return this.request<{ cap_id: string }>("PUT", "/chat/caps", cap);
+  }
+  deleteCap(capId: string) {
+    return this.request<void>("DELETE", `/chat/caps/${capId}`);
+  }
+  getOrgSettings() {
+    return this.request<OrgSettings>("GET", "/chat/settings");
+  }
+  setTrainingConsent(consent: boolean) {
+    return this.request<{ training_consent: boolean }>("PUT", "/chat/settings/training-consent", { consent });
+  }
+  getActionCatalog() {
+    return this.request<{ actions: ActionCatalogItem[] }>("GET", "/chat/action-catalog").then((r) => r.actions);
+  }
+  getActionRules() {
+    return this.request<ActionRules>("GET", "/chat/action-rules");
+  }
+  updateActionRules(rules: Partial<ActionRules>) {
+    return this.request<ActionRules>("PUT", "/chat/action-rules", rules);
+  }
+  listActions(status?: string) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    return this.request<{ actions: ActionView[] }>("GET", `/chat/actions${q}`).then((r) => r.actions);
+  }
+  approveAction(id: string) {
+    return this.request<ActionView>("POST", `/chat/actions/${id}/approve`);
+  }
+  rejectAction(id: string, reason?: string) {
+    return this.request<ActionView>("POST", `/chat/actions/${id}/reject`, { reason });
+  }
+  listPlans() {
+    return this.request<{ plans: Plan[] }>("GET", "/chat/plans").then((r) => r.plans);
+  }
+  subscribe(planId: string, spendLimitMinor?: number | null) {
+    return this.request<{ invoice_id: string | null }>("POST", "/chat/billing/subscription", {
+      plan_id: planId,
+      spend_limit_minor: spendLimitMinor ?? null,
+    });
+  }
+  updateSubscription(body: { plan_id?: string; spend_limit_minor?: number; remove_spend_limit?: boolean }) {
+    return this.request<{ change?: string; subscription: Subscription }>("PUT", "/chat/billing/subscription", body);
+  }
+  getBillingProfile() {
+    return this.request<{ profile: BillingProfile | null }>("GET", "/chat/billing/profile").then((r) => r.profile);
+  }
+  updateBillingProfile(profile: BillingProfile) {
+    return this.request("PUT", "/chat/billing/profile", profile);
   }
 }

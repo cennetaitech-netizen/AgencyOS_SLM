@@ -48,6 +48,7 @@ def register_ops_routes(app: FastAPI, services, principal, require_role, audited
     async def org_settings(p: Principal = Depends(org_admin), svc=Depends(services)):
         org = await svc.orgs.get(p.org_id)
         return {
+            "org_id": str(p.org_id),
             "chat_enabled": org.chat_enabled,
             "billing_mode": org.billing_mode or svc.settings.billing_mode,
             "timezone": org.timezone,

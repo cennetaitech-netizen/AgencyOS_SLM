@@ -91,6 +91,13 @@ export interface ActionView {
   summary: string | null;
   error: string | null;
   undo_available: boolean;
+  risk_tier?: 1 | 2 | 3;
+  target_id?: string | null;
+  before?: ActionState | null;
+  after?: ActionState | null;
+  warnings?: string[];
+  requested_by?: string;
+  confirmed_by?: string | null;
 }
 
 export type StreamEvent =
@@ -143,4 +150,49 @@ export interface Cap {
   period: "day" | "month";
   max_tokens: number;
   hard: boolean;
+}
+
+export interface OrgSettings {
+  org_id: string;
+  chat_enabled: boolean;
+  billing_mode: BillingMode;
+  timezone: string;
+  currency: string;
+  training_consent: boolean;
+}
+
+export interface ActionCatalogItem {
+  name: string;
+  label: string;
+  risk_tier: 1 | 2 | 3;
+  reversible: boolean;
+}
+
+export interface ActionRules {
+  write_actions_enabled: boolean;
+  max_budget_change_pct: number;
+  max_budget_change_abs_minor: number | null;
+  second_approval_above_minor: number | null;
+  daily_spend_change_cap_minor: number | null;
+  tier1_requires_confirmation: boolean;
+  roles_by_tier: Record<string, string[]>;
+  blocked_tools: string[];
+}
+
+export interface Plan {
+  plan_id: string;
+  name: string;
+  monthly_fee_minor: number;
+  currency: string;
+  monthly_included_tokens: number;
+  overage_allowed: boolean;
+  price_per_1m_tokens_minor: number | null;
+}
+
+export interface BillingProfile {
+  legal_name: string;
+  address: Record<string, string>;
+  tax_id: string | null;
+  country: string;
+  billing_email: string;
 }

@@ -139,6 +139,16 @@ def register_m2_routes(app: FastAPI, services, principal, require_role, audited)
     async def undo_action(action_id: uuid.UUID, p: Principal = Depends(principal), svc=Depends(services)):
         return {"proposal": await _do(svc.actions.undo, p, action_id)}
 
+    @app.get("/chat/action-catalog")
+    async def action_catalog(p: Principal = Depends(org_admin), svc=Depends(services)):
+        """The actions chat can propose, for the admin settings screen."""
+        return {
+            "actions": [
+                {"name": s.name, "label": s.label, "risk_tier": s.risk_tier, "reversible": s.reversible}
+                for s in svc.actions.specs.values()
+            ]
+        }
+
     @app.get("/chat/action-rules")
     async def get_action_rules(p: Principal = Depends(org_admin), svc=Depends(services)):
         return (await svc.actions.rules(p.org_id)).__dict__

@@ -135,3 +135,28 @@
   .aos-panel.aos-panel--convs-open .aos-convs { display: block; position: absolute; inset: 0; z-index: 2; }
   .aos-only-mobile { display: inline-block; }
 }
+
+/* Admin settings */
+.aos-admin { max-width: 960px; }
+.aos-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--aos-border); margin-bottom: 16px; }
+.aos-tab { border: 0; background: none; color: var(--aos-muted); padding: 8px 12px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.aos-tab[aria-selected="true"] { color: var(--aos-text); border-bottom-color: var(--aos-accent); font-weight: 600; }
+.aos-tab:focus-visible { outline: 2px solid var(--aos-accent); outline-offset: 2px; }
+.aos-tabpanel h3 { margin-top: 0; }
+.aos-form { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+.aos-form--inline { max-width: none; flex-direction: row; flex-wrap: wrap; align-items: flex-end; margin-top: 16px; }
+.aos-form--inline h4, .aos-form--inline > .aos-field__hint { flex-basis: 100%; margin: 0; }
+.aos-form fieldset { border: 1px solid var(--aos-border); border-radius: var(--aos-radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.aos-form fieldset:disabled { opacity: 0.55; }
+.aos-form legend { font-weight: 600; padding: 0 4px; }
+.aos-field { display: flex; flex-direction: column; gap: 4px; }
+.aos-field__label { font-weight: 500; }
+.aos-field__hint { color: var(--aos-muted); font-size: 12px; display: block; }
+.aos-field input, .aos-field select { font: inherit; padding: 6px 8px; border: 1px solid var(--aos-border); border-radius: 8px; background: var(--aos-bg); color: var(--aos-text); min-width: 160px; }
+.aos-check { display: flex; gap: 10px; align-items: flex-start; }
+.aos-check input { margin-top: 4px; }
+.aos-check > span { display: flex; flex-direction: column; gap: 2px; }
+.aos-check > span > .aos-tier { align-self: flex-start; }
+.aos-ok { color: var(--aos-ok); margin: 8px 0 0; }
+.aos-pack.is-current { border-color: var(--aos-accent); }
+.aos-admin .aos-action { max-width: 640px; }
