@@ -507,7 +507,7 @@ class ActionService:
         if principal.user_id != row.requested_by:
             raise ActionError("forbidden", "only the person who asked can cancel this")
         async with self.engine.begin() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 update(chat_actions)
                 .where(
                     chat_actions.c.action_id == action_id,
@@ -515,13 +515,15 @@ class ActionService:
                 )
                 .values(status="cancelled")
             )
+        if result.rowcount:
+            ACTIONS.labels(row.tool_name, "cancelled").inc()
         return self.view(await self._get_row(principal.org_id, action_id))
 
     async def reject(self, principal: Principal, action_id: uuid.UUID, reason: str | None = None) -> dict[str, Any]:
         if not principal.has_role(self.settings.approver_role):
             raise ActionError("forbidden", "only an approver can reject this")
         async with self.engine.begin() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 update(chat_actions)
                 .where(
                     chat_actions.c.action_id == action_id,
@@ -529,7 +531,11 @@ class ActionService:
                     chat_actions.c.status == "awaiting_second_approval",
                 )
                 .values(status="rejected", error=reason or "rejected by approver")
+                .returning(chat_actions.c.tool_name)
             )
+            rejected = result.scalar_one_or_none()
+        if rejected:
+            ACTIONS.labels(rejected, "rejected_by_approver").inc()
         return self.view(await self._get_row(principal.org_id, action_id))
 
     async def undo(self, principal: Principal, action_id: uuid.UUID) -> dict[str, Any]:
@@ -561,8 +567,12 @@ class ActionService:
                     chat_actions.c.expires_at <= self.clock(),
                 )
                 .values(status="expired")
+                .returning(chat_actions.c.tool_name)
             )
-        return result.rowcount
+            tools = result.scalars().all()
+        for tool in tools:
+            ACTIONS.labels(tool, "expired").inc()
+        return len(tools)
 
     async def list(self, org_id: uuid.UUID, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         q = select(chat_actions).where(chat_actions.c.org_id == org_id)

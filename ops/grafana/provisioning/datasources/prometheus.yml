@@ -1,0 +1,10 @@
+# Grafana data source for the assistant dashboard. Set PROMETHEUS_URL (e.g. http://prometheus:9090).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: true
+    jsonData: {timeInterval: 15s}

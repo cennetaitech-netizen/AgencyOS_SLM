@@ -1,0 +1,14 @@
+# Prometheus config for the assistant: scrapes every API instance and loads the SLO alert rules.
+# In production, replace static_configs with your service discovery and keep job_name as-is
+# (the alerts and the dashboard filter on job="agencyos-assistant").
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files: [alerts.yml]
+scrape_configs:
+  - job_name: agencyos-assistant
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /etc/prometheus/metrics_token   # same value as CHAT_METRICS_TOKEN
+    static_configs:
+      - targets: ["api:8090"]

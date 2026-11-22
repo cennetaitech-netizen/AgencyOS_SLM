@@ -1,0 +1,9 @@
+# Loads every dashboard JSON in DASHBOARDS_DIR (e.g. /var/lib/grafana/dashboards) into the "AgencyOS" folder.
+apiVersion: 1
+providers:
+  - name: agencyos
+    folder: AgencyOS
+    type: file
+    allowUiUpdates: false
+    options:
+      path: ${DASHBOARDS_DIR}

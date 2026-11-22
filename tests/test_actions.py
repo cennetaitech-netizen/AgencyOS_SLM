@@ -279,3 +279,33 @@ async def test_rejected_proposals_are_kept_for_audit(actions, planner, engine):
     async with engine.begin() as conn:  # status values are constrained by the DB
         with pytest.raises(Exception):  # noqa: B017
             await conn.execute(update(chat_actions).values(status="bogus"))
+
+
+async def test_outcome_metrics_count_cancel_reject_and_expire_once(actions, planner, admin, org, clock):
+    from prometheus_client import REGISTRY
+
+    def count(tool, outcome):
+        return REGISTRY.get_sample_value("aos_chat_actions_total", {"tool": tool, "outcome": outcome}) or 0
+
+    before = {o: count("update_campaign_budget", o) for o in ("cancelled", "rejected_by_approver", "expired")}
+    args = {"campaign_id": "cmp_101", "new_budget": 310000}
+    aid = uuid.UUID((await propose(actions, planner, "update_campaign_budget", args))["card"]["action_id"])
+    await actions.cancel(planner, aid)
+    await actions.cancel(planner, aid)  # already cancelled: not counted again
+
+    await actions.set_rules(org, second_approval_above_minor=0)
+    aid = uuid.UUID((await propose(actions, planner, "update_campaign_budget", args))["card"]["action_id"])
+    await actions.confirm(planner, aid)
+    await actions.reject(admin, aid, "no")
+    await actions.reject(admin, aid, "no")
+
+    await propose(actions, planner, "update_campaign_budget", args)
+    clock.advance(minutes=11)
+    await actions.expire()
+    await actions.expire()
+
+    assert {o: count("update_campaign_budget", o) - n for o, n in before.items()} == {
+        "cancelled": 1,
+        "rejected_by_approver": 1,
+        "expired": 1,
+    }

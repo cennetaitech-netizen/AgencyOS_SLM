@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-22 · Backend tests: **163 passing** (Postgres 16 + Redis) · Widget tests: **11 passing** · Migrations: 0001–0004
+Last updated: 2026-11-22 · Backend tests: **167 passing** (Postgres 16 + Redis) · Widget tests: **19 passing** · Migrations: 0001–0004
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -10,7 +10,7 @@ Last updated: 2026-11-22 · Backend tests: **163 passing** (Postgres 16 + Redis)
 | Model client & bake-off | 2 | OpenAI-compatible streaming, fallback host; G2 bake-off with overhead ratio | 7 |
 | Tools | 3 | Registry, `media_math`, `validate_ad_copy`, 6 product read tools (placeholder endpoints) + mock product | 20 |
 | Chat engine | 4 | Gates, context block, agent loop, refusals, disconnect settlement, numeric grounding flags, structured logs, analytics, per-org model routing | 20 |
-| **Chat window** | **5** | React widget: streaming chat, conversations, confirmation cards with Undo, token counts, balance, banners, blocked states, feedback, safe markdown, disclaimer, dark mode, phone layout; billing page; demo app. Checked in a real browser against the running service | 11 (Vitest) + browser screenshots |
+| **Chat window** | **5** | React widget: streaming chat, conversations, confirmation cards with Undo, token counts, balance, banners, blocked states, feedback, safe markdown, disclaimer, dark mode, phone layout; billing page; **admin settings** (second-approver queue, chat action rules, usage limits, plan and overage limit, billing details, training consent); demo app. Checked in a real browser against the running service | 19 (Vitest) + browser screenshots |
 | Payments | 6 | Dev provider, signed webhooks for packs and invoices | in API tests |
 | **Ops & quality** | **7** | 32-case full-engine eval with CI gate (`eval.yml`), numeric grounding check, unit economics (overhead ratio, margin, alerts), quality review, analytics events, staff endpoints | 19 |
 | Chat actions | 9 | Propose → confirm → execute with all safety rules, undo, kill switches | 25 |
@@ -18,6 +18,7 @@ Last updated: 2026-11-22 · Backend tests: **163 passing** (Postgres 16 + Redis)
 | **Own SLM** | **11** | Dataset builder (consent, scrub, corrections, eval exclusion, DPO pairs), synthetic generator, short fine-tune prompt, LoRA SFT + DPO scripts (CPU smoke-tested with a tiny model), release gate, canary rollout with automatic rollback, runbook, model card | 13 + training smoke run |
 | CI | 7 | Lint, format, migrations, backend tests, widget typecheck/tests/build; model eval on relevant PRs; dependency and secret scans | — |
 | **Launch hardening** | **12** | Production start-up guard, security headers/CORS/size limit, audit log, encryption at rest with key rotation, Redis-shared limits, metrics + readiness + 9 SLO alerts, cross-tenant security suite, load test at 3× and failure drill (money checks pass), Dockerfile + compose, runbooks. See [LAUNCH_READINESS.md](LAUNCH_READINESS.md) | 16 + load/drill runs |
+| **Monitoring** | **12** | Grafana dashboard (20 panels in 5 sections: SLO headline, traffic and latency, tokens and margin, tools and actions, resilience, firing alerts), Prometheus config, provisioning, compose `monitoring` profile, query checker. Every query verified against live data | 4 (metric/label drift, generator, action outcome counts) + live run |
 
 ## Blocked on inputs
 | Needed | Unblocks |
@@ -32,6 +33,4 @@ Last updated: 2026-11-22 · Backend tests: **163 passing** (Postgres 16 + Redis)
 | The product's design system | Restyling the widget via `--aos-*` variables; embedding it in the product shell |
 
 ## Remaining engineering (no external input needed)
-1. Widget: admin screens for caps, action rules and plan changes (the APIs exist).
-2. Grafana dashboard from the panels listed in LAUNCH_READINESS.md §2.
-3. Build and smoke-test the container image in CI (no Docker daemon in this environment).
+1. Build and smoke-test the container image (and the compose `monitoring` profile) in CI; there's no Docker daemon in this environment.

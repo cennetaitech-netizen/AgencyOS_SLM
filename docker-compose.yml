@@ -1,5 +1,7 @@
 # Local full stack: Postgres, Redis (no persistence), migrations, API, jobs and a stand-in model host.
 # docker compose up --build    → API on http://localhost:8090 (dev auth), demo widget via `npm run dev` in widget/
+# docker compose --profile monitoring up --build → also Prometheus (http://localhost:9090, SLO alert rules) and
+#   Grafana (http://localhost:3000, admin/admin) with the "AgencyOS Assistant" dashboard.
 services:
   postgres:
     image: postgres:16
@@ -23,6 +25,7 @@ services:
       CHAT_MODEL_BASE_URL: http://model:8003/v1
       CHAT_AUTH_PROVIDER: dev
       CHAT_PRODUCT_ADAPTER: mock
+      CHAT_METRICS_TOKEN: ${CHAT_METRICS_TOKEN:-dev-metrics-token}
     depends_on: {postgres: {condition: service_healthy}}
   api:
     build: .
@@ -34,5 +37,28 @@ services:
     command: ["python", "-m", "chat_service.jobs"]
     environment: *env
     depends_on: {migrate: {condition: service_completed_successfully}}
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: [monitoring]
+    ports: ["9090:9090"]
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    configs: [{source: metrics_token, target: /etc/prometheus/metrics_token}]
+    depends_on: [api]
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: [monitoring]
+    ports: ["3000:3000"]
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      DASHBOARDS_DIR: /var/lib/grafana/dashboards
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+configs:
+  metrics_token:
+    content: ${CHAT_METRICS_TOKEN:-dev-metrics-token}
 volumes:
   pgdata: {}
