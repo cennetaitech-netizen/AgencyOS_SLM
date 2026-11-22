@@ -26,11 +26,33 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "get_campaign_performance": ("GET", "/api/v1/performance"),
     "get_budget_pacing": ("GET", "/api/v1/campaigns/{campaign_id}/pacing"),
     "search_help_docs": ("GET", "/api/v1/help/search"),
+    "get_campaign_details": ("GET", "/api/v1/campaigns/{campaign_id}"),
+    # Write operations (Phase 9). Only ever called by ActionService after human confirmation.
+    "update_campaign_budget": ("PATCH", "/api/v1/campaigns/{campaign_id}"),
+    "pause_campaign": ("POST", "/api/v1/campaigns/{campaign_id}/pause"),
+    "resume_campaign": ("POST", "/api/v1/campaigns/{campaign_id}/resume"),
+    "rename_campaign": ("PATCH", "/api/v1/campaigns/{campaign_id}"),
 }
+
+# Write tool → how its arguments map to the request body. TODO(Phase 0): match the real API.
+WRITE_BODIES: dict[str, dict[str, str]] = {
+    "update_campaign_budget": {"new_budget": "budget"},
+    "pause_campaign": {},
+    "resume_campaign": {},
+    "rename_campaign": {"new_name": "name"},
+}
+
+
+class ProductWriteConflict(Exception):
+    """The product refused the change (e.g. state changed, platform rejected it)."""
 
 
 class ProductAPI(Protocol):
     async def call(self, ctx: ToolContext, tool_name: str, params: dict[str, Any]) -> dict[str, Any]: ...
+
+    async def write(
+        self, ctx: ToolContext, tool_name: str, params: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]: ...
 
 
 class HttpProductAPI:
@@ -55,6 +77,26 @@ class HttpProductAPI:
             raise ToolInputError("not found: check the ID (use list_clients / list_campaigns)")
         resp.raise_for_status()
         return resp.json()
+
+    async def write(
+        self, ctx: ToolContext, tool_name: str, params: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]:
+        """Execute a confirmed change as the user. The idempotency key makes retries safe."""
+        method, template = ENDPOINTS[tool_name]
+        if method == "GET":
+            raise RuntimeError(f"{tool_name} is not a write operation")
+        path_params = {k: params[k] for k in _placeholders(template) if k in params}
+        body = {dest: params[src] for src, dest in WRITE_BODIES[tool_name].items() if src in params}
+        headers = {"X-Request-ID": ctx.request_id, "Idempotency-Key": idempotency_key}
+        if ctx.user_credential:
+            headers["Authorization"] = f"Bearer {ctx.user_credential}"
+        resp = await self._client.request(method, template.format(**path_params), json=body, headers=headers)
+        if resp.status_code in (401, 403):
+            raise PermissionError(resp.status_code)
+        if resp.status_code in (409, 422):
+            raise ProductWriteConflict(resp.text[:300])
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
 
 
 def _placeholders(template: str) -> list[str]:
@@ -120,6 +162,8 @@ class MockProductAPI:
             },
         ]
         self.currency = "INR"
+        self.write_log: dict[str, dict[str, Any]] = {}  # idempotency key → result
+        self.fail_next_write: str | None = None  # tests: simulate a platform rejection
 
     def _daily(self, campaign_id: str, day: date) -> dict[str, float]:
         seed = int(hashlib.sha256(f"{campaign_id}:{day.isoformat()}".encode()).hexdigest()[:12], 16)
@@ -180,6 +224,8 @@ class MockProductAPI:
                 "days_elapsed": max(0, (last - start).days + 1),
                 "total_days": (end - start).days + 1,
             }
+        if tool_name == "get_campaign_details":
+            return {"data_as_of": as_of, "currency": self.currency, **self._campaign(params["campaign_id"])}
         if tool_name == "search_help_docs":
             return {
                 "rows": [
@@ -190,6 +236,29 @@ class MockProductAPI:
                 ]
             }
         raise ToolInputError(f"unsupported tool {tool_name}")
+
+    async def write(
+        self, ctx: ToolContext, tool_name: str, params: dict[str, Any], idempotency_key: str
+    ) -> dict[str, Any]:
+        if idempotency_key in self.write_log:
+            return self.write_log[idempotency_key]
+        if self.fail_next_write:
+            msg, self.fail_next_write = self.fail_next_write, None
+            raise ProductWriteConflict(msg)
+        c = self._campaign(params["campaign_id"])
+        if tool_name == "update_campaign_budget":
+            c["budget"] = params["new_budget"]
+        elif tool_name == "pause_campaign":
+            c["status"] = "paused"
+        elif tool_name == "resume_campaign":
+            c["status"] = "active"
+        elif tool_name == "rename_campaign":
+            c["name"] = params["new_name"]
+        else:
+            raise ToolInputError(f"unsupported write {tool_name}")
+        result = {"ok": True, "campaign": dict(c)}
+        self.write_log[idempotency_key] = result
+        return result
 
     def _performance(self, params: dict[str, Any], as_of: str) -> dict[str, Any]:
         d_from, d_to = date.fromisoformat(params["date_from"]), date.fromisoformat(params["date_to"])
@@ -306,6 +375,19 @@ def product_tools(api: ProductAPI) -> list[Tool]:
                 "additionalProperties": False,
             },
             handler=handler("get_budget_pacing"),
+        ),
+        Tool(
+            name="get_campaign_details",
+            label="Looking up the campaign",
+            group="planning",
+            description="Current settings of one campaign: name, platform, status, budget, flight dates.",
+            parameters={
+                "type": "object",
+                "properties": {"campaign_id": {"type": "string"}},
+                "required": ["campaign_id"],
+                "additionalProperties": False,
+            },
+            handler=handler("get_campaign_details"),
         ),
         Tool(
             name="search_help_docs",

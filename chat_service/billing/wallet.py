@@ -66,6 +66,7 @@ class Balance:
     tokens_available: int
     tokens_reserved: int
     buckets: list[BucketView] = field(default_factory=list)
+    has_paid: bool = False  # ever bought a pack or has a subscription
 
     @property
     def spendable(self) -> int:
@@ -73,7 +74,8 @@ class Balance:
 
     @property
     def only_free_trial(self) -> bool:
-        return all(b.source == "free_trial" for b in self.buckets)
+        """True for orgs that have never paid: the free-trial daily ceiling applies to them."""
+        return not self.has_paid
 
 
 @dataclass(frozen=True)
@@ -353,10 +355,22 @@ class WalletService:
                     .order_by(*_BUCKET_ORDER)
                 )
             ).all()
+            paid_buckets = (
+                await conn.execute(
+                    select(func.count()).where(
+                        chat_credit_buckets.c.org_id == org_id,
+                        chat_credit_buckets.c.source.in_(("pack", "plan_monthly")),
+                    )
+                )
+            ).scalar_one()
+            has_sub = (
+                await conn.execute(select(func.count()).where(chat_subscriptions.c.org_id == org_id))
+            ).scalar_one()
         buckets = [BucketView(r.bucket_id, r.source, r.tokens_granted - r.tokens_used, r.expires_at) for r in rows]
+        has_paid = bool(paid_buckets or has_sub)
         if wallet is None:
-            return Balance(org_id, 0, 0, buckets)
-        return Balance(org_id, wallet.tokens_available, wallet.tokens_reserved, buckets)
+            return Balance(org_id, 0, 0, buckets, has_paid)
+        return Balance(org_id, wallet.tokens_available, wallet.tokens_reserved, buckets, has_paid)
 
     # ------------------------------------------------------------------ reserve / settle / release
 

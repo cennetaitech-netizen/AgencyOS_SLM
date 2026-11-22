@@ -5,6 +5,8 @@
 * retry pending refund/chargeback reversals
 * retention: delete conversations older than CHAT_RETENTION_DAYS (daily is enough; cheap to run often)
 * wallet invariant check: alert on any mismatch
+* chat actions: expire stale proposals and approval requests
+* subscriptions: close billing cycles that ended (invoice + renew), dunning (past due → suspended)
 """
 
 from __future__ import annotations
@@ -16,16 +18,26 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from chat_service.actions.service import ActionService
+from chat_service.billing.invoices import InvoiceService
+from chat_service.billing.subscriptions import SubscriptionService
 from chat_service.billing.wallet import WalletService
 from chat_service.config import Settings, get_settings
 from chat_service.db import create_engine
 from chat_service.db.schema import chat_wallets
 from chat_service.engine.store import ConversationStore, retention_cutoff
+from chat_service.tools import default_product_api
 
 log = logging.getLogger("chat_service.jobs")
 
 
-async def run_once(wallet: WalletService, conversations: ConversationStore, settings: Settings) -> dict[str, int]:
+async def run_once(
+    wallet: WalletService,
+    conversations: ConversationStore,
+    settings: Settings,
+    actions: ActionService | None = None,
+    subscriptions: SubscriptionService | None = None,
+) -> dict[str, int]:
     result = {
         "reservations_expired": await wallet.expire_reservations(),
         "buckets_expired": await wallet.expire_buckets(),
@@ -40,6 +52,11 @@ async def run_once(wallet: WalletService, conversations: ConversationStore, sett
     for org in broken:
         log.error("wallet invariant broken for org %s", org)  # wire to alerting (PagerDuty/Slack) in Phase 7
     result["invariant_failures"] = len(broken)
+    if actions is not None:
+        result["actions_expired"] = await actions.expire()
+    if subscriptions is not None:
+        result["invoices_created"] = len(await subscriptions.close_due_cycles())
+        result["subscriptions_suspended"] = await subscriptions.run_dunning()
     return result
 
 
@@ -48,9 +65,11 @@ async def main(once: bool, interval_seconds: int) -> None:
     engine = create_engine(settings.database_url)
     wallet = WalletService(engine, settings)
     conversations = ConversationStore(engine)
+    actions = ActionService(engine, settings, default_product_api(settings))
+    subscriptions = SubscriptionService(engine, settings, wallet, InvoiceService(engine, settings))
     try:
         while True:
-            log.info("jobs: %s", await run_once(wallet, conversations, settings))
+            log.info("jobs: %s", await run_once(wallet, conversations, settings, actions, subscriptions))
             if once:
                 return
             await asyncio.sleep(interval_seconds)

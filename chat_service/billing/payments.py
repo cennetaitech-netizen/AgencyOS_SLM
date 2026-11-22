@@ -22,8 +22,9 @@ class Checkout:
 
 @dataclass(frozen=True)
 class WebhookEvent:
-    kind: Literal["paid", "refunded", "disputed", "ignored"]
+    kind: Literal["paid", "refunded", "disputed", "invoice_paid", "invoice_payment_failed", "ignored"]
     provider_payment_id: str | None
+    provider_invoice_id: str | None = None
 
 
 class WebhookSignatureError(Exception):
@@ -63,6 +64,8 @@ class DevPaymentProvider:
             raise WebhookSignatureError("bad signature")
         data = json.loads(body)
         kind = data.get("type")
+        if kind in ("invoice_paid", "invoice_payment_failed"):
+            return WebhookEvent(kind, None, data["provider_invoice_id"])
         if kind not in ("paid", "refunded", "disputed"):
             return WebhookEvent("ignored", None)
         return WebhookEvent(kind, data["provider_payment_id"])

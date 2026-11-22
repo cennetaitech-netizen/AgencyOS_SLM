@@ -244,6 +244,26 @@ class InvoiceService:
             raise InvoiceError("unknown invoice")
         return row.org_id
 
+    async def org_for_provider_invoice(self, provider_invoice_id: str) -> uuid.UUID:
+        async with self.engine.connect() as conn:
+            org_id = (
+                await conn.execute(
+                    select(chat_invoices.c.org_id).where(chat_invoices.c.provider_invoice_id == provider_invoice_id)
+                )
+            ).scalar_one_or_none()
+        if org_id is None:
+            raise InvoiceError("unknown invoice")
+        return org_id
+
+    async def org_of(self, invoice_id: uuid.UUID) -> uuid.UUID:
+        async with self.engine.connect() as conn:
+            org_id = (
+                await conn.execute(select(chat_invoices.c.org_id).where(chat_invoices.c.invoice_id == invoice_id))
+            ).scalar_one_or_none()
+        if org_id is None:
+            raise InvoiceError("invoice not found")
+        return org_id
+
     async def void(self, invoice_id: uuid.UUID) -> None:
         async with self.engine.begin() as conn:
             result = await conn.execute(

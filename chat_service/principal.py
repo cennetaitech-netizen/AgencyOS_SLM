@@ -13,6 +13,7 @@ class Principal:
     display_name: str = "User"
     roles: tuple[str, ...] = ()
     credential: str | None = field(default=None, repr=False)  # forwarded to the product API as the user
+    workspace_id: uuid.UUID | None = None
 
     @property
     def primary_role(self) -> str:

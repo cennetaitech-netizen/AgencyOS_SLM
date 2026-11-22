@@ -7,13 +7,14 @@ ceilings, shadow billing, refusal handling, client-disconnect settlement, versio
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from chat_service.billing.tokenizer import BillingTokenizer
@@ -24,6 +25,11 @@ from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, ModelError, StreamEnd, TextDelta
 from chat_service.principal import Principal
 from chat_service.tools.registry import ToolContext, ToolRegistry
+
+if TYPE_CHECKING:
+    from chat_service.actions.service import ActionService
+    from chat_service.billing.caps import CapsService
+    from chat_service.billing.subscriptions import SubscriptionService
 
 REFUSAL_SENTENCE = "I can only help with media campaigns and AgencyOS."
 _PROMPTS = Path(__file__).with_name("prompts")
@@ -53,6 +59,10 @@ class _Turn:
     host_prompt: int = 0
     host_completion: int = 0
     finished: bool = False
+    prompt_version: str = "system_v1"
+    writes_enabled: bool = False
+    client_id: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class ChatEngine:
@@ -66,6 +76,9 @@ class ChatEngine:
         conversations: ConversationStore,
         orgs: OrgSettingsStore,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        actions: ActionService | None = None,
+        subscriptions: SubscriptionService | None = None,
+        caps: CapsService | None = None,
     ) -> None:
         self.s = settings
         self.wallet = wallet
@@ -77,7 +90,10 @@ class ChatEngine:
         self.clock = clock
         self.rate_limiter = RateLimiter(settings.rate_limit_per_user_per_min)
         self.concurrency = ConcurrencyLimiter(settings.max_concurrent_streams_per_org)
-        self.system_template = load_prompt(settings.prompt_version)
+        self.actions = actions
+        self.subscriptions = subscriptions
+        self.caps = caps
+        self._templates: dict[str, str] = {}
 
     # ------------------------------------------------------------------ public
 
@@ -137,9 +153,11 @@ class ChatEngine:
         local = self.clock().astimezone(tz)
         return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
-    def _system_prompt(self, principal: Principal, org) -> str:
+    def _system_prompt(self, principal: Principal, org, version: str) -> str:
+        if version not in self._templates:
+            self._templates[version] = load_prompt(version)
         today = self.clock().astimezone(ZoneInfo(org.timezone)).date().isoformat()
-        return self.system_template.format(
+        return self._templates[version].format(
             today_date=today,
             org_timezone=org.timezone,
             org_currency=org.currency,
@@ -152,12 +170,14 @@ class ChatEngine:
             billable_input_tokens=turn.billable_input,
             billable_output_tokens=self.tokenizer.count(turn.visible),
             model_name=self.model.name,
-            prompt_version=self.s.prompt_version,
+            prompt_version=turn.prompt_version,
             billing_tokenizer_version=self.tokenizer.version,
             host_prompt_tokens=turn.host_prompt,
             host_completion_tokens=turn.host_completion,
             serving_host=getattr(self.model, "last_serving_host", "primary"),
             steps=turn.steps,
+            workspace_id=turn.workspace_id,
+            client_id=turn.client_id,
         )
 
     async def _finalise(
@@ -178,29 +198,40 @@ class ChatEngine:
     async def _run(self, principal: Principal, org, conversation_id: uuid.UUID, text: str):
         s = self.s
         mode = self._mode(org)
+        if self.subscriptions is not None:
+            sub = await self.subscriptions.get(principal.org_id)
+            if sub is not None and sub.status == "suspended":
+                yield error_event("billing_suspended", "The assistant is paused because of an unpaid invoice.")
+                return
         await self.wallet.ensure_free_trial(principal.org_id)
         balance = await self.wallet.get_balance(principal.org_id)
         used_today = await self.wallet.org_tokens_since(principal.org_id, self._day_start(org.timezone))
         daily_cap = s.free_trial_daily_max_tokens if balance.only_free_trial else s.org_daily_max_tokens
-        if used_today >= daily_cap:
-            yield error_event("daily_limit_reached", "Your organisation has reached today's assistant limit.")
-            return
 
-        turn = _Turn(message_id=uuid.uuid4(), billable_input=self.tokenizer.count(text))
-        output_budget = min(s.max_output_tokens, daily_cap - used_today - turn.billable_input)
+        turn = _Turn(
+            message_id=uuid.uuid4(),
+            billable_input=self.tokenizer.count(text),
+            workspace_id=principal.workspace_id,
+        )
+        turn.writes_enabled = self.actions is not None and await self.actions.writes_enabled(principal.org_id)
+        turn.prompt_version = s.prompt_version_actions if turn.writes_enabled else s.prompt_version
+
+        # Every limit that applies; the tightest one sets the reply budget (and the error if too small).
+        limits = [
+            (daily_cap - used_today, "daily_limit_reached", "Your organisation has reached today's assistant limit.")
+        ]
         if mode == "live":
-            output_budget = min(output_budget, balance.spendable - turn.billable_input)
+            capacity = await self.wallet.capacity(principal.org_id)
+            limits.append((capacity, "insufficient_tokens", "You've used all your tokens."))
+        if self.caps is not None:
+            cap = await self.caps.check(principal.org_id, principal.user_id, principal.workspace_id, org.timezone)
+            if cap.remaining is not None:
+                limits.append(
+                    (cap.remaining, "usage_cap_reached", "You've reached the assistant limit set by your admin.")
+                )
+        headroom, code, msg = min(limits, key=lambda x: x[0])
+        output_budget = min(s.max_output_tokens, headroom - turn.billable_input)
         if output_budget < s.min_useful_output:
-            code = (
-                "insufficient_tokens"
-                if mode == "live" and balance.spendable < daily_cap - used_today
-                else "daily_limit_reached"
-            )
-            msg = (
-                "You've used all your tokens."
-                if code == "insufficient_tokens"
-                else "Your organisation has reached today's assistant limit."
-            )
             yield error_event(code, msg)
             return
         if mode == "live":
@@ -231,7 +262,7 @@ class ChatEngine:
             history = await self.conversations.history(conversation_id, s.history_turns)
             await self.conversations.add_message(conversation_id, "user", text)
             messages: list[dict[str, Any]] = [
-                {"role": "system", "content": self._system_prompt(principal, org)},
+                {"role": "system", "content": self._system_prompt(principal, org, turn.prompt_version)},
                 *history,
                 {"role": "user", "content": text},
             ]
@@ -245,7 +276,7 @@ class ChatEngine:
                 end: StreamEnd | None = None
                 async for ev in self.model.stream(
                     messages,
-                    None if is_last else self.registry.schemas(),
+                    None if is_last else self.registry.schemas(include_write=turn.writes_enabled),
                     min(s.max_output_tokens, max(remaining, 256)),
                     s.model_temperature,
                 ):
@@ -273,16 +304,47 @@ class ChatEngine:
                 )
                 for call in end.tool_calls:
                     tool = self.registry.get(call.name)
+                    args = _safe_args(call.arguments)
+                    turn.client_id = turn.client_id or _client_of(args)
                     yield event("tool.start", tool=call.name, label=tool.label if tool else "Working on it")
+                    if tool is not None and not tool.read_only and turn.writes_enabled:
+                        # Write action: store a proposal for the user to confirm. Never executed here.
+                        proposal = await self.actions.propose(
+                            principal, ctx, conversation_id, turn.message_id, call.name, call.arguments
+                        )
+                        ok = proposal["card"] is not None or "executed" in proposal
+                        yield event("tool.end", tool=call.name, ok=ok)
+                        if proposal["card"] is not None:
+                            yield event("action.proposed", **proposal["card"])
+                        if "executed" in proposal:
+                            yield event("action.executed", **proposal["executed"])
+                        content = json.dumps(proposal["for_model"], default=str)
+                        tool_records.append(
+                            {
+                                "step": step,
+                                "tool_name": call.name,
+                                "args": args,
+                                "ok": ok,
+                                "result": proposal["for_model"],
+                                "result_chars": len(content),
+                                "truncated": False,
+                                "duration_ms": None,
+                                "error": None if ok else proposal["for_model"].get("reason"),
+                            }
+                        )
+                        messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
+                        continue
                     result = await self.registry.execute(
                         ctx, call.name, call.arguments, s.tool_timeout_seconds, s.tool_result_max_chars
                     )
                     yield event("tool.end", tool=call.name, ok=result.ok)
+                    if result.ok:
+                        turn.client_id = turn.client_id or _client_of(result.data)
                     tool_records.append(
                         {
                             "step": step,
                             "tool_name": call.name,
-                            "args": _safe_args(call.arguments),
+                            "args": args,
                             "ok": result.ok,
                             "result": result.data if result.ok else None,
                             "result_chars": result.result_chars,
@@ -302,6 +364,13 @@ class ChatEngine:
             await self._save_assistant(conversation_id, turn, charged, tool_records)
             balance = await self.wallet.get_balance(principal.org_id)
             usage = self._usage(turn)
+            alerts = (
+                await self.caps.evaluate_alerts(
+                    principal.org_id, principal.user_id, principal.workspace_id, org.timezone
+                )
+                if self.caps is not None
+                else []
+            )
             yield event(
                 "message.end",
                 message_id=str(turn.message_id),
@@ -311,6 +380,7 @@ class ChatEngine:
                 billing_mode=mode,
                 balance_after=balance.spendable,
                 low_balance=balance.spendable < s.low_balance_tokens,
+                alerts=alerts,
             )
         except (asyncio.CancelledError, GeneratorExit):
             # Client disconnected mid-stream: charge only the visible text already sent.
@@ -337,15 +407,27 @@ class ChatEngine:
             turn.visible,
             message_id=turn.message_id,
             tokens_charged=charged,
-            prompt_version=self.s.prompt_version,
+            prompt_version=turn.prompt_version,
             model_name=self.model.name,
         )
         await self.conversations.add_tool_calls(turn.message_id, tool_records)
 
 
-def _safe_args(raw: str) -> Any:
-    import json
+def _client_of(data: Any) -> str | None:
+    """Best-effort brand/client attribution for per-brand usage breakdowns on invoices."""
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("client_id"), str):
+        return data["client_id"]
+    rows = data.get("rows")
+    if isinstance(rows, list):
+        ids = {r.get("client_id") for r in rows if isinstance(r, dict) and r.get("client_id")}
+        if len(ids) == 1:
+            return ids.pop()
+    return None
 
+
+def _safe_args(raw: str) -> Any:
     try:
         value = json.loads(raw) if raw else {}
         return value if isinstance(value, dict) else {"_raw": raw[:2000]}

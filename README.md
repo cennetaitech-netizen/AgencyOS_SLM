@@ -58,6 +58,8 @@ python -m chat_service.evals.bakeoff --models evals/models.json
 | `chat_service/billing/tokenizer.py` | Fixed, versioned billable-token counting |
 | `chat_service/billing/payments.py` | Payment provider interface (dev provider; Stripe/Razorpay later) |
 | `chat_service/engine/agent.py` | Chat engine: gates → reserve → model ⇄ tools loop → settle |
+| `chat_service/actions/` | Chat actions: specs (tiers, preview, undo) and the propose → confirm → execute service |
+| `chat_service/billing/subscriptions.py`, `invoices.py`, `caps.py` | Plans, overage, cycle close, dunning; invoices; caps and alerts |
 | `chat_service/engine/prompts/` | Versioned system prompts |
 | `chat_service/tools/` | Tool registry, `media_math`, `validate_ad_copy`, product read tools (+ mock product) |
 | `chat_service/llm/` | OpenAI-compatible streaming client with fallback; scripted fake model |

@@ -16,8 +16,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from chat_service.actions.service import ActionService
 from chat_service.api.auth import AuthProvider, DevAuthProvider, ProductAuthProvider
+from chat_service.billing.caps import CapsService, LogNotifier
+from chat_service.billing.invoices import InvoiceError, InvoiceService, LogInvoiceSink
 from chat_service.billing.payments import DevPaymentProvider, PaymentProvider, WebhookSignatureError
+from chat_service.billing.subscriptions import SubscriptionService
 from chat_service.billing.tokenizer import build_tokenizer
 from chat_service.billing.wallet import WalletError, WalletService
 from chat_service.config import Settings, get_settings
@@ -27,7 +31,7 @@ from chat_service.engine.agent import ChatEngine
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import FallbackModelClient, ModelClient, OpenAICompatibleClient
 from chat_service.principal import Principal
-from chat_service.tools import build_registry
+from chat_service.tools import build_registry, default_product_api
 from chat_service.tools.product import ProductAPI
 
 
@@ -73,19 +77,28 @@ class Services:
     ) -> None:
         self.settings = settings
         self.db = db
+        self.product_api = product_api or default_product_api(settings)
         self.wallet = WalletService(db, settings)
         self.conversations = ConversationStore(db)
         self.orgs = OrgSettingsStore(db)
         self.auth = auth
         self.payments = payments
+        self.notifier = LogNotifier()  # TODO(Phase 6): product email / in-app notifications
+        self.invoices = InvoiceService(db, settings, LogInvoiceSink())  # TODO(D9): provider or accounting sink
+        self.subscriptions = SubscriptionService(db, settings, self.wallet, self.invoices)
+        self.caps = CapsService(db, self.notifier, settings.alert_thresholds)
+        self.actions = ActionService(db, settings, self.product_api, orgs=self.orgs, notifier=self.notifier)
         self.chat = ChatEngine(
             settings,
             self.wallet,
-            build_registry(settings, product_api),
+            build_registry(settings, self.product_api),
             model,
             build_tokenizer(settings),
             self.conversations,
             self.orgs,
+            actions=self.actions,
+            subscriptions=self.subscriptions,
+            caps=self.caps,
         )
 
 
@@ -344,7 +357,13 @@ def create_app(
                 await svc.wallet.credit_purchase(ev.provider_payment_id)
             elif ev.kind in ("refunded", "disputed"):
                 await svc.wallet.reverse_purchase(ev.provider_payment_id, ev.kind)
-        except WalletError as exc:
+            elif ev.kind == "invoice_paid":
+                org_id = await svc.invoices.mark_paid(ev.provider_invoice_id)
+                await svc.subscriptions.payment_succeeded(org_id)
+            elif ev.kind == "invoice_payment_failed":
+                org_id = await svc.invoices.org_for_provider_invoice(ev.provider_invoice_id)
+                await svc.subscriptions.payment_failed(org_id)
+        except (WalletError, InvoiceError) as exc:
             raise HTTPException(409, str(exc)) from exc
 
     # ------------------------------------------------------------------ internal admin (AgencyOS staff)
@@ -377,6 +396,9 @@ def create_app(
         bucket_id = await svc.wallet.grant_goodwill(org_id, body.tokens, p.user_id, body.note)
         return {"bucket_id": str(bucket_id)}
 
+    from chat_service.api.routes_m2 import register_m2_routes
+
+    register_m2_routes(app, services, principal, require_role)
     return app
 
 

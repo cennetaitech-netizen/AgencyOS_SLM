@@ -28,7 +28,15 @@ class DevAuthProvider:
         except (KeyError, ValueError) as exc:
             raise HTTPException(401, "missing or invalid dev identity headers") from exc
         roles = tuple(r.strip() for r in request.headers.get("X-Dev-Roles", "member").split(",") if r.strip())
-        return Principal(user_id, org_id, request.headers.get("X-Dev-Name", "Dev User"), roles, None)
+        ws = request.headers.get("X-Dev-Workspace-Id")
+        return Principal(
+            user_id,
+            org_id,
+            request.headers.get("X-Dev-Name", "Dev User"),
+            roles,
+            request.headers.get("X-Dev-Credential"),
+            uuid.UUID(ws) if ws else None,
+        )
 
 
 class ProductAuthProvider:

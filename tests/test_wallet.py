@@ -241,3 +241,35 @@ async def test_daily_usage_counts_charged_and_shadow(wallet, clock):
     await wallet.record_shadow(org, uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), usage(50, 50), True)
     start_of_day = clock.now.replace(hour=0, minute=0)
     assert await wallet.org_tokens_since(org, start_of_day) == 300
+
+
+async def test_jobs_run_once_covers_actions_and_billing(wallet, engine, settings, clock):
+    from chat_service.actions.service import ActionService
+    from chat_service.billing.invoices import InvoiceService
+    from chat_service.billing.subscriptions import SubscriptionService
+    from chat_service.engine.store import ConversationStore
+    from chat_service.jobs import run_once
+    from chat_service.tools.product import MockProductAPI
+
+    subs = SubscriptionService(engine, settings, wallet, InvoiceService(engine, settings, clock=clock), clock)
+    await subs.upsert_plan(plan_id="s", name="S", monthly_fee_minor=100, currency="INR", monthly_included_tokens=10)
+    org = uuid.uuid4()
+    await subs.subscribe(org, "s")
+    clock.advance(days=32)
+    result = await run_once(
+        wallet,
+        ConversationStore(engine),
+        settings,
+        ActionService(engine, settings, MockProductAPI(), clock=clock),
+        subs,
+    )
+    assert result["invoices_created"] == 1 and result["invariant_failures"] == 0
+
+
+async def test_paid_org_is_not_treated_as_free_trial_after_buckets_run_out(wallet, engine):
+    org = uuid.uuid4()
+    await buy(wallet, engine, org, tokens=100)
+    r = await reserve(wallet, org, 100)
+    await wallet.settle(r.reservation_id, usage(50, 50))
+    bal = await wallet.get_balance(org)
+    assert bal.buckets == [] and bal.only_free_trial is False
