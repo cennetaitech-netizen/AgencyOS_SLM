@@ -26,6 +26,7 @@ from chat_service.config import Settings, get_settings
 from chat_service.db import create_engine
 from chat_service.db.schema import chat_wallets
 from chat_service.engine.store import ConversationStore, retention_cutoff
+from chat_service.llm.router import RolloutStore
 from chat_service.tools import default_product_api
 
 log = logging.getLogger("chat_service.jobs")
@@ -37,6 +38,7 @@ async def run_once(
     settings: Settings,
     actions: ActionService | None = None,
     subscriptions: SubscriptionService | None = None,
+    rollout: RolloutStore | None = None,
 ) -> dict[str, int]:
     result = {
         "reservations_expired": await wallet.expire_reservations(),
@@ -57,6 +59,9 @@ async def run_once(
     if subscriptions is not None:
         result["invoices_created"] = len(await subscriptions.close_due_cycles())
         result["subscriptions_suspended"] = await subscriptions.run_dunning()
+    if rollout is not None:
+        decision = await rollout.evaluate_canary(settings)
+        result["canary_rolled_back"] = int(decision.get("decision") == "rolled_back")
     return result
 
 
@@ -67,9 +72,10 @@ async def main(once: bool, interval_seconds: int) -> None:
     conversations = ConversationStore(engine)
     actions = ActionService(engine, settings, default_product_api(settings))
     subscriptions = SubscriptionService(engine, settings, wallet, InvoiceService(engine, settings))
+    rollout = RolloutStore(engine, settings.model_name)
     try:
         while True:
-            log.info("jobs: %s", await run_once(wallet, conversations, settings, actions, subscriptions))
+            log.info("jobs: %s", await run_once(wallet, conversations, settings, actions, subscriptions, rollout))
             if once:
                 return
             await asyncio.sleep(interval_seconds)

@@ -115,7 +115,11 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
 
     @app.post("/chat/actions/{action_id}/confirm")
     async def confirm_action(action_id: uuid.UUID, p: Principal = Depends(principal), svc=Depends(services)):
-        return await _do(svc.actions.confirm, p, action_id)
+        view = await _do(svc.actions.confirm, p, action_id)
+        await svc.analytics.track(
+            "action_confirmed", p.org_id, p.user_id, {"tool": view["tool"], "status": view["status"]}
+        )
+        return view
 
     @app.post("/chat/actions/{action_id}/cancel")
     async def cancel_action(action_id: uuid.UUID, p: Principal = Depends(principal), svc=Depends(services)):
@@ -161,6 +165,7 @@ def register_m2_routes(app: FastAPI, services, principal, require_role) -> None:
             invoice_id = await svc.subscriptions.subscribe(p.org_id, body.plan_id, body.spend_limit_minor)
         except SubscriptionError as exc:
             raise HTTPException(409, str(exc)) from exc
+        await svc.analytics.track("subscription_started", p.org_id, p.user_id, {"plan_id": body.plan_id})
         return {"invoice_id": str(invoice_id) if invoice_id else None}
 
     @app.put("/chat/billing/subscription")

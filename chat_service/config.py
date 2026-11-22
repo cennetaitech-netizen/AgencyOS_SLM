@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     model_base_url: str = "http://localhost:8001/v1"
     model_api_key: str = Field(default="", repr=False)
     model_name: str = "media-slm-dev"
+    extra_model_names: list[str] = Field(default_factory=list)  # e.g. fine-tuned LoRA versions on the same host
     model_fallback_base_url: str | None = None
     model_fallback_api_key: str = Field(default="", repr=False)
     model_fallback_name: str | None = None
@@ -80,6 +81,18 @@ class Settings(BaseSettings):
     tax_rates: dict[str, float] = Field(default_factory=dict)  # country → %, set by finance, e.g. {"IN": 18}
     dunning_grace_days: int = 7
     alert_thresholds: tuple[int, ...] = (50, 80, 90, 100)
+
+    # Unit economics & quality (Phase 7) — prices in minor units per 1M tokens (finance input)
+    host_price_input_per_1m_minor: int = 0
+    host_price_output_per_1m_minor: int = 0
+    list_price_per_1m_tokens_minor: int = 0
+    max_overhead_ratio: float = 20.0
+    min_gross_margin_pct: float = 70.0
+
+    # Model rollout (Phase 11)
+    rollout_min_messages: int = 200  # canary messages needed before judging it
+    rollout_max_error_rate_increase: float = 0.02  # +2 points vs production → roll back
+    rollout_max_downvote_rate_increase: float = 0.05  # +5 points vs production → roll back
 
     # Chat actions (Phase 9)
     action_expiry_minutes: int = 10

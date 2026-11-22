@@ -174,6 +174,7 @@ chat_messages = Table(
     Column("tokens_charged", Integer, nullable=True),
     Column("prompt_version", String(64), nullable=True),
     Column("model_name", String(128), nullable=True),
+    Column("flags", JSONB, nullable=True),  # quality flags, e.g. {"ungrounded_numbers": [...]}
     _ts("created_at"),
     CheckConstraint("role IN ('user','assistant')", name="role_valid"),
 )
@@ -233,6 +234,7 @@ chat_org_settings = Table(
     Column("training_consent_by", UUID(as_uuid=True), nullable=True),
     Column("timezone", String(64), nullable=False, server_default="UTC"),
     Column("currency", String(3), nullable=False, server_default="USD"),
+    Column("model_pin", String(128), nullable=True),  # pin this org to a model version (rollout safety)
     _ts("updated_at"),
     CheckConstraint("billing_mode IS NULL OR billing_mode IN ('shadow','live')", name="mode_valid"),
 )
@@ -429,4 +431,20 @@ chat_usage_alerts = Table(
     Column("threshold", Integer, nullable=False),  # 50 / 80 / 90 / 100
     _ts("created_at"),
     UniqueConstraint("org_id", "scope", "period_key", "threshold", name="uq_chat_usage_alerts_once"),
+)
+
+# --------------------------------------------------------------------------- model rollout (Phase 11)
+
+chat_model_rollout = Table(
+    "chat_model_rollout",
+    metadata,
+    Column("id", String(32), primary_key=True),  # single row: 'default'
+    Column("production_model", String(128), nullable=False),
+    Column("canary_model", String(128), nullable=True),
+    Column("canary_percent", Integer, nullable=False, server_default="0"),
+    Column("status", String(16), nullable=False, server_default="idle"),
+    Column("note", Text, nullable=True),
+    _ts("updated_at"),
+    CheckConstraint("canary_percent >= 0 AND canary_percent <= 100", name="percent_valid"),
+    CheckConstraint("status IN ('idle','canary','promoted','rolled_back')", name="status_valid"),
 )

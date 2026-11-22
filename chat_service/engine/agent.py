@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
@@ -20,6 +22,7 @@ from zoneinfo import ZoneInfo
 from chat_service.billing.tokenizer import BillingTokenizer
 from chat_service.billing.wallet import Reservation, UsageRecord, WalletService
 from chat_service.config import Settings
+from chat_service.engine.grounding import ungrounded_numbers
 from chat_service.engine.limits import ConcurrencyLimiter, RateLimiter
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, ModelError, StreamEnd, TextDelta
@@ -28,10 +31,12 @@ from chat_service.tools.registry import ToolContext, ToolRegistry
 
 if TYPE_CHECKING:
     from chat_service.actions.service import ActionService
+    from chat_service.analytics.events import AnalyticsSink
     from chat_service.billing.caps import CapsService
     from chat_service.billing.subscriptions import SubscriptionService
 
 REFUSAL_SENTENCE = "I can only help with media campaigns and AgencyOS."
+log = logging.getLogger("chat_service.engine")
 _PROMPTS = Path(__file__).with_name("prompts")
 
 
@@ -63,6 +68,11 @@ class _Turn:
     writes_enabled: bool = False
     client_id: str | None = None
     workspace_id: uuid.UUID | None = None
+    model: Any = None  # the ModelClient serving this message
+    started: float = 0.0
+    ttft_ms: int | None = None
+    sources: list[Any] | None = None  # data the answer may draw numbers from (grounding check)
+    tools_used: list[str] | None = None
 
 
 class ChatEngine:
@@ -79,6 +89,7 @@ class ChatEngine:
         actions: ActionService | None = None,
         subscriptions: SubscriptionService | None = None,
         caps: CapsService | None = None,
+        analytics: AnalyticsSink | None = None,
     ) -> None:
         self.s = settings
         self.wallet = wallet
@@ -93,6 +104,7 @@ class ChatEngine:
         self.actions = actions
         self.subscriptions = subscriptions
         self.caps = caps
+        self.analytics = analytics
         self._templates: dict[str, str] = {}
 
     # ------------------------------------------------------------------ public
@@ -145,6 +157,18 @@ class ChatEngine:
 
     # ------------------------------------------------------------------ internals
 
+    async def _track(self, event_name: str, principal: Principal, **props: Any) -> None:
+        if self.analytics is not None:
+            try:
+                await self.analytics.track(event_name, principal.org_id, principal.user_id, props)
+            except Exception:  # noqa: BLE001 - analytics must never break chat
+                log.exception("analytics sink failed")
+
+    async def _select_model(self, principal: Principal, org) -> Any:
+        if hasattr(self.model, "select"):  # ModelRouter: canary / pinning (Phase 11)
+            return await self.model.select(principal.org_id, getattr(org, "model_pin", None))
+        return self.model
+
     def _mode(self, org) -> str:
         return org.billing_mode or self.s.billing_mode
 
@@ -169,12 +193,12 @@ class ChatEngine:
         return UsageRecord(
             billable_input_tokens=turn.billable_input,
             billable_output_tokens=self.tokenizer.count(turn.visible),
-            model_name=self.model.name,
+            model_name=turn.model.name,
             prompt_version=turn.prompt_version,
             billing_tokenizer_version=self.tokenizer.version,
             host_prompt_tokens=turn.host_prompt,
             host_completion_tokens=turn.host_completion,
-            serving_host=getattr(self.model, "last_serving_host", "primary"),
+            serving_host=getattr(turn.model, "last_serving_host", "primary"),
             steps=turn.steps,
             workspace_id=turn.workspace_id,
             client_id=turn.client_id,
@@ -203,7 +227,8 @@ class ChatEngine:
             if sub is not None and sub.status == "suspended":
                 yield error_event("billing_suspended", "The assistant is paused because of an unpaid invoice.")
                 return
-        await self.wallet.ensure_free_trial(principal.org_id)
+        if await self.wallet.ensure_free_trial(principal.org_id):
+            await self._track("trial_granted", principal, tokens=s.free_trial_tokens)
         balance = await self.wallet.get_balance(principal.org_id)
         used_today = await self.wallet.org_tokens_since(principal.org_id, self._day_start(org.timezone))
         daily_cap = s.free_trial_daily_max_tokens if balance.only_free_trial else s.org_daily_max_tokens
@@ -212,7 +237,11 @@ class ChatEngine:
             message_id=uuid.uuid4(),
             billable_input=self.tokenizer.count(text),
             workspace_id=principal.workspace_id,
+            started=time.monotonic(),
+            sources=[text],
+            tools_used=[],
         )
+        turn.model = await self._select_model(principal, org)
         turn.writes_enabled = self.actions is not None and await self.actions.writes_enabled(principal.org_id)
         turn.prompt_version = s.prompt_version_actions if turn.writes_enabled else s.prompt_version
 
@@ -274,13 +303,15 @@ class ChatEngine:
                     break
                 step_text = ""
                 end: StreamEnd | None = None
-                async for ev in self.model.stream(
+                async for ev in turn.model.stream(
                     messages,
                     None if is_last else self.registry.schemas(include_write=turn.writes_enabled),
                     min(s.max_output_tokens, max(remaining, 256)),
                     s.model_temperature,
                 ):
                     if isinstance(ev, TextDelta):
+                        if turn.ttft_ms is None:
+                            turn.ttft_ms = int((time.monotonic() - turn.started) * 1000)
                         step_text += ev.text
                         turn.visible += ev.text
                         yield event("token", text=ev.text)
@@ -305,6 +336,7 @@ class ChatEngine:
                 for call in end.tool_calls:
                     tool = self.registry.get(call.name)
                     args = _safe_args(call.arguments)
+                    turn.tools_used.append(call.name)
                     turn.client_id = turn.client_id or _client_of(args)
                     yield event("tool.start", tool=call.name, label=tool.label if tool else "Working on it")
                     if tool is not None and not tool.read_only and turn.writes_enabled:
@@ -314,7 +346,9 @@ class ChatEngine:
                         )
                         ok = proposal["card"] is not None or "executed" in proposal
                         yield event("tool.end", tool=call.name, ok=ok)
+                        turn.sources.append(proposal["for_model"])
                         if proposal["card"] is not None:
+                            await self._track("action_proposed", principal, tool=call.name)
                             yield event("action.proposed", **proposal["card"])
                         if "executed" in proposal:
                             yield event("action.executed", **proposal["executed"])
@@ -340,6 +374,7 @@ class ChatEngine:
                     yield event("tool.end", tool=call.name, ok=result.ok)
                     if result.ok:
                         turn.client_id = turn.client_id or _client_of(result.data)
+                        turn.sources.append(result.data)
                     tool_records.append(
                         {
                             "step": step,
@@ -361,7 +396,9 @@ class ChatEngine:
                 principal, org, conversation_id, turn, charge, "refusal" if refusal else None
             )
             turn.finished = True
-            await self._save_assistant(conversation_id, turn, charged, tool_records)
+            ungrounded = [] if refusal else ungrounded_numbers(turn.visible, turn.sources)
+            flags = {"ungrounded_numbers": ungrounded} if ungrounded else None
+            await self._save_assistant(conversation_id, turn, charged, tool_records, flags)
             balance = await self.wallet.get_balance(principal.org_id)
             usage = self._usage(turn)
             alerts = (
@@ -381,6 +418,19 @@ class ChatEngine:
                 balance_after=balance.spendable,
                 low_balance=balance.spendable < s.low_balance_tokens,
                 alerts=alerts,
+                quality_flags=flags or {},
+            )
+            await self._after_message(
+                principal,
+                conversation_id,
+                turn,
+                mode,
+                charged,
+                "ok",
+                refusal,
+                flags,
+                alerts,
+                balance.spendable < s.low_balance_tokens,
             )
         except (asyncio.CancelledError, GeneratorExit):
             # Client disconnected mid-stream: charge only the visible text already sent.
@@ -392,15 +442,63 @@ class ChatEngine:
             if not turn.finished:
                 turn.finished = True
                 reason = "model_error" if isinstance(exc, ModelError) else "internal_error"
+                log.exception("chat message failed: %s", reason)
                 await self._finalise(principal, org, conversation_id, turn, False, reason)
                 await self._save_assistant(conversation_id, turn, 0, tool_records)
+                await self._after_message(principal, conversation_id, turn, mode, 0, reason, False, None, [], False)
             yield error_event("internal_error", "Something went wrong. You were not charged for this message.")
 
     async def _on_disconnect(self, principal, org, conversation_id, turn: _Turn, tool_records) -> None:
         charged = await self._finalise(principal, org, conversation_id, turn, bool(turn.visible), "client_disconnect")
         await self._save_assistant(conversation_id, turn, charged, tool_records)
 
-    async def _save_assistant(self, conversation_id, turn: _Turn, charged: int, tool_records) -> None:
+    async def _after_message(
+        self, principal, conversation_id, turn: _Turn, mode, charged, status, refusal, flags, alerts, low_balance
+    ) -> None:
+        """Structured log line per message (no secrets, no message text) + analytics events."""
+        record = {
+            "org_id": str(principal.org_id),
+            "user_id": str(principal.user_id),
+            "conversation_id": str(conversation_id),
+            "message_id": str(turn.message_id),
+            "model": turn.model.name if turn.model else None,
+            "serving_host": getattr(turn.model, "last_serving_host", "primary"),
+            "prompt_version": turn.prompt_version,
+            "steps": turn.steps,
+            "tools": turn.tools_used,
+            "billable_input": turn.billable_input,
+            "billable_output": self.tokenizer.count(turn.visible),
+            "tokens_charged": charged,
+            "host_prompt_tokens": turn.host_prompt,
+            "host_completion_tokens": turn.host_completion,
+            "ttft_ms": turn.ttft_ms,
+            "latency_ms": int((time.monotonic() - turn.started) * 1000),
+            "billing_mode": mode,
+            "status": status,
+            "refusal": refusal,
+            "ungrounded_numbers": len((flags or {}).get("ungrounded_numbers", [])),
+        }
+        log.info("chat_message %s", json.dumps(record))
+        if status != "ok":
+            await self._track("chat_error", principal, reason=status)
+            return
+        await self._track(
+            "chat_message_sent",
+            principal,
+            tokens=charged,
+            steps=turn.steps,
+            tools=turn.tools_used,
+            latency_ms=record["latency_ms"],
+            mode=mode,
+        )
+        if refusal:
+            await self._track("chat_refusal", principal)
+        if low_balance:
+            await self._track("low_balance_shown", principal)
+        for alert in alerts:
+            await self._track("usage_alert", principal, **alert)
+
+    async def _save_assistant(self, conversation_id, turn: _Turn, charged: int, tool_records, flags=None) -> None:
         await self.conversations.add_message(
             conversation_id,
             "assistant",
@@ -408,7 +506,8 @@ class ChatEngine:
             message_id=turn.message_id,
             tokens_charged=charged,
             prompt_version=turn.prompt_version,
-            model_name=self.model.name,
+            model_name=turn.model.name if turn.model else None,
+            flags=flags,
         )
         await self.conversations.add_tool_calls(turn.message_id, tool_records)
 

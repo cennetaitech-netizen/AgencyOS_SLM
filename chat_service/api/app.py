@@ -17,6 +17,7 @@ from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chat_service.actions.service import ActionService
+from chat_service.analytics.events import LogAnalyticsSink
 from chat_service.api.auth import AuthProvider, DevAuthProvider, ProductAuthProvider
 from chat_service.billing.caps import CapsService, LogNotifier
 from chat_service.billing.invoices import InvoiceError, InvoiceService, LogInvoiceSink
@@ -30,6 +31,7 @@ from chat_service.db.schema import chat_token_packs, chat_usage_events
 from chat_service.engine.agent import ChatEngine
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import FallbackModelClient, ModelClient, OpenAICompatibleClient
+from chat_service.llm.router import ModelRouter, RolloutStore
 from chat_service.principal import Principal
 from chat_service.tools import build_registry, default_product_api
 from chat_service.tools.product import ProductAPI
@@ -58,6 +60,7 @@ class OrgSettingsUpdate(BaseModel):
     billing_mode: Literal["shadow", "live"] | None = None
     timezone: str | None = None
     currency: str | None = Field(default=None, min_length=3, max_length=3)
+    model_pin: str | None = Field(default=None, max_length=128)
 
 
 class Goodwill(BaseModel):
@@ -88,6 +91,9 @@ class Services:
         self.subscriptions = SubscriptionService(db, settings, self.wallet, self.invoices)
         self.caps = CapsService(db, self.notifier, settings.alert_thresholds)
         self.actions = ActionService(db, settings, self.product_api, orgs=self.orgs, notifier=self.notifier)
+        self.analytics = LogAnalyticsSink()  # TODO(Phase 7): product analytics tool
+        self.model = model
+        self.rollout = model.store if isinstance(model, ModelRouter) else RolloutStore(db, settings.model_name)
         self.chat = ChatEngine(
             settings,
             self.wallet,
@@ -99,12 +105,13 @@ class Services:
             actions=self.actions,
             subscriptions=self.subscriptions,
             caps=self.caps,
+            analytics=self.analytics,
         )
 
 
-def _default_model(settings: Settings) -> ModelClient:
+def _client_for(settings: Settings, model_name: str) -> ModelClient:
     primary = OpenAICompatibleClient(
-        settings.model_base_url, settings.model_api_key, settings.model_name, settings.model_timeout_seconds
+        settings.model_base_url, settings.model_api_key, model_name, settings.model_timeout_seconds
     )
     fallback = None
     if settings.model_fallback_base_url and settings.model_fallback_name:
@@ -115,6 +122,13 @@ def _default_model(settings: Settings) -> ModelClient:
             settings.model_timeout_seconds,
         )
     return FallbackModelClient(primary, fallback)
+
+
+def _default_model(settings: Settings, db: AsyncEngine) -> ModelClient:
+    """A router over the production model and any extra versions (e.g. fine-tuned LoRA adapters on the same
+    host), so canary rollouts and per-org pinning work without code changes."""
+    names = [settings.model_name, *[n for n in settings.extra_model_names if n != settings.model_name]]
+    return ModelRouter(RolloutStore(db, settings.model_name), {n: _client_for(settings, n) for n in names})
 
 
 def _default_auth(settings: Settings) -> AuthProvider:
@@ -142,7 +156,7 @@ def create_app(
         app.state.services = Services(
             settings,
             engine,
-            model or _default_model(settings),
+            model or _default_model(settings, engine),
             product_api,
             auth or _default_auth(settings),
             payments or DevPaymentProvider(settings.payment_webhook_secret),
@@ -243,6 +257,9 @@ def create_app(
         if owner is None or owner.org_id != p.org_id or owner.user_id != p.user_id or owner.role != "assistant":
             raise HTTPException(404, "message not found")
         await svc.conversations.add_feedback(message_id, p.user_id, body.rating, body.reason, body.comment)
+        await svc.analytics.track(
+            "chat_answer_rated", p.org_id, p.user_id, {"rating": body.rating, "reason": body.reason}
+        )
 
     # ------------------------------------------------------------------ wallet, usage, packs
 
@@ -333,6 +350,7 @@ def create_app(
             ).first()
         if pack is None:
             raise HTTPException(404, "pack not found")
+        await svc.analytics.track("checkout_started", p.org_id, p.user_id, {"pack_id": pack.pack_id})
         co = await svc.payments.create_checkout(
             p.org_id,
             pack.pack_id,
@@ -355,6 +373,7 @@ def create_app(
         try:
             if ev.kind == "paid":
                 await svc.wallet.credit_purchase(ev.provider_payment_id)
+                await svc.analytics.track("pack_purchased", None, None, {"provider_payment_id": ev.provider_payment_id})
             elif ev.kind in ("refunded", "disputed"):
                 await svc.wallet.reverse_purchase(ev.provider_payment_id, ev.kind)
             elif ev.kind == "invoice_paid":
@@ -399,6 +418,9 @@ def create_app(
     from chat_service.api.routes_m2 import register_m2_routes
 
     register_m2_routes(app, services, principal, require_role)
+    from chat_service.api.routes_ops import register_ops_routes
+
+    register_ops_routes(app, services, principal, require_role)
     return app
 
 

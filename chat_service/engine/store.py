@@ -28,6 +28,7 @@ class OrgSettings:
     timezone: str
     currency: str
     training_consent: bool
+    model_pin: str | None = None
 
 
 class OrgSettingsStore:
@@ -39,7 +40,9 @@ class OrgSettingsStore:
             row = (await conn.execute(select(chat_org_settings).where(chat_org_settings.c.org_id == org_id))).first()
         if row is None:
             return OrgSettings(org_id, False, None, "UTC", "USD", False)
-        return OrgSettings(org_id, row.chat_enabled, row.billing_mode, row.timezone, row.currency, row.training_consent)
+        return OrgSettings(
+            org_id, row.chat_enabled, row.billing_mode, row.timezone, row.currency, row.training_consent, row.model_pin
+        )
 
     async def upsert(self, org_id: uuid.UUID, **values: Any) -> OrgSettings:
         allowed = {
@@ -50,6 +53,7 @@ class OrgSettingsStore:
             "training_consent",
             "training_consent_at",
             "training_consent_by",
+            "model_pin",
         }
         values = {k: v for k, v in values.items() if k in allowed}
         async with self.engine.begin() as conn:
@@ -117,6 +121,7 @@ class ConversationStore:
         tokens_charged: int | None = None,
         prompt_version: str | None = None,
         model_name: str | None = None,
+        flags: dict[str, Any] | None = None,
     ) -> uuid.UUID:
         mid = message_id or uuid.uuid4()
         async with self.engine.begin() as conn:
@@ -129,6 +134,7 @@ class ConversationStore:
                     tokens_charged=tokens_charged,
                     prompt_version=prompt_version,
                     model_name=model_name,
+                    flags=flags,
                 )
             )
             values: dict[str, Any] = {"updated_at": func.now()}
