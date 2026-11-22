@@ -101,6 +101,19 @@ class ConversationStore:
             ).all()
         return [dict(r._mapping) for r in rows]
 
+    async def rename(self, org_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID, title: str) -> bool:
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(chat_conversations)
+                .where(
+                    chat_conversations.c.id == conversation_id,
+                    chat_conversations.c.org_id == org_id,
+                    chat_conversations.c.user_id == user_id,
+                )
+                .values(title=title[:200], updated_at=func.now())
+            )
+        return result.rowcount > 0
+
     async def delete(self, org_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID) -> bool:
         async with self.engine.begin() as conn:
             result = await conn.execute(

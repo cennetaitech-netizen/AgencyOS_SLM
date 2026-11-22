@@ -37,6 +37,12 @@ from chat_service.tools.product import MockProductAPI
         ("From 2026-11-01 to 2026-11-15 you ran 3 campaigns", [{}], []),  # dates and small counts ignored
         ("You asked about 450000 revenue", ["revenue 450000 spend 90000"], []),  # from the user's message
         ("CTR improved 25%", [{"result": 25.0}], []),
+        (
+            "Acme for 15–21 Nov 2026: spend 55,512.99",
+            [{"date_range": {"from": "2026-11-15", "to": "2026-11-21"}, "spend": 55512.99}],
+            [],
+        ),
+        ("Spend in Dec 2027 was 5,000", [{"date_range": {"from": "2026-11-15"}, "spend": 5000}], ["2027"]),
     ],
 )
 def test_grounding(answer, sources, missing):

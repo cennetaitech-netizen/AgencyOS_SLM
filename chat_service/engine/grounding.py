@@ -36,8 +36,18 @@ def _flatten(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, default=str)
 
 
+_ISO_PARTS = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})")
+
+
+def _source_numbers(text: str) -> list[str]:
+    """Numbers in a source, plus the year/month/day of any ISO date, so an answer can say "15–21 Nov 2026"
+    about a date range the tool returned as 2026-11-15 … 2026-11-21."""
+    parts = [str(int(x)) for m in _ISO_PARTS.finditer(text) for x in m.groups()]
+    return _numbers(text) + parts
+
+
 def ungrounded_numbers(answer: str, sources: list[Any], ignore_up_to: int = 10) -> list[str]:
-    source_values = {d for s in sources for n in _numbers(_flatten(s)) if (d := _dec(n)) is not None}
+    source_values = {d for s in sources for n in _source_numbers(_flatten(s)) if (d := _dec(n)) is not None}
     missing = []
     for raw in _numbers(answer):
         value = _dec(raw)

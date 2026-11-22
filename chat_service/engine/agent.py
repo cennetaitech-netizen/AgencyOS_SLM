@@ -238,7 +238,7 @@ class ChatEngine:
             billable_input=self.tokenizer.count(text),
             workspace_id=principal.workspace_id,
             started=time.monotonic(),
-            sources=[text],
+            sources=[text, self.clock().astimezone(ZoneInfo(org.timezone)).date().isoformat()],
             tools_used=[],
         )
         turn.model = await self._select_model(principal, org)

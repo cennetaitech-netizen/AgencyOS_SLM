@@ -79,6 +79,10 @@ async def test_full_chat_flow(client_factory, ids):
 
     convs = (await client.get("/chat/conversations", headers=h)).json()["conversations"]
     assert convs[0]["title"] == "status?"
+    r = await client.patch(f"/chat/conversations/{conv}", json={"title": "Weekly status"}, headers=h)
+    assert r.json()["title"] == "Weekly status"
+    other = headers(uuid.uuid4(), ids["org"])
+    assert (await client.patch(f"/chat/conversations/{conv}", json={"title": "x"}, headers=other)).status_code == 404
     assert (await client.delete(f"/chat/conversations/{conv}", headers=h)).status_code == 204
     assert (await client.get(f"/chat/conversations/{conv}/messages", headers=h)).status_code == 404
     await ctx.__aexit__(None, None, None)

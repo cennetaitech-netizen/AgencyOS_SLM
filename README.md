@@ -65,6 +65,12 @@ python -m chat_service.evals.bakeoff --models evals/models.json
 | `chat_service/llm/` | OpenAI-compatible streaming client with fallback; scripted fake model |
 | `chat_service/api/` | FastAPI app, auth providers |
 | `chat_service/evals/bakeoff.py` | Gate G2 model bake-off |
+| `chat_service/analytics/` | Unit economics, quality review, analytics events |
+| `chat_service/evals/` | G2 bake-off and the full-engine eval (CI gate) |
+| `chat_service/ml/` | Training data builder, synthetic generator, release gate |
+| `chat_service/llm/router.py` | Model rollout: canary, per-org pinning, automatic rollback |
+| `ml/` | LoRA SFT/DPO training scripts, configs, runbook ([ml/README.md](ml/README.md)) |
+| `widget/` | React chat window and billing page ([widget/README.md](widget/README.md)) |
 | `migrations/` | Alembic migrations |
 
 ## Planning documents

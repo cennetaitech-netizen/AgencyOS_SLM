@@ -228,6 +228,17 @@ def create_app(
             ]
         }
 
+    @app.patch("/chat/conversations/{conversation_id}")
+    async def rename_conversation(
+        conversation_id: uuid.UUID,
+        body: NewConversation,
+        p: Principal = Depends(principal),
+        svc: Services = Depends(services),
+    ) -> dict[str, str | None]:
+        if not body.title or not await svc.conversations.rename(p.org_id, p.user_id, conversation_id, body.title):
+            raise HTTPException(404, "conversation not found")
+        return {"id": str(conversation_id), "title": body.title}
+
     @app.delete("/chat/conversations/{conversation_id}", status_code=204)
     async def delete_conversation(
         conversation_id: uuid.UUID, p: Principal = Depends(principal), svc: Services = Depends(services)

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgencyOS Assistant (dev demo)</title>
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      body { background: #eef0f4; font-family: system-ui, sans-serif; }
+      .demo { display: grid; grid-template-rows: auto 1fr; height: 100%; padding: 16px; box-sizing: border-box; gap: 12px; }
+      .demo > nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+      .demo > nav input { width: 300px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/demo/main.tsx"></script>
+  </body>
+</html>

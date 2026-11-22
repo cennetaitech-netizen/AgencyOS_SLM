@@ -32,3 +32,20 @@ jobs:
       - name: Migration applies and matches the schema
         run: alembic upgrade head && alembic check && alembic downgrade base
       - run: pytest -q
+
+  widget:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: widget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: widget/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
