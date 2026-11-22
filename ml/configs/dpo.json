@@ -1,0 +1,17 @@
+{
+  "_comment": "Run after SFT, on SME-corrected preference pairs. Lower learning rate than SFT.",
+  "base_model": "TODO/base-model-from-G2-bakeoff",
+  "epochs": 2,
+  "batch_size": 2,
+  "grad_accum": 8,
+  "learning_rate": 0.000005,
+  "beta": 0.1,
+  "max_length": 8192,
+  "lora_r": 16,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "target_modules": "all-linear",
+  "logging_steps": 10,
+  "report_to": "none",
+  "seed": 42
+}

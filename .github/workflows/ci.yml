@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check chat_service tests migrations
+      - run: ruff check chat_service tests migrations ml
       - run: ruff format --check chat_service tests
       - name: Migration applies and matches the schema
         run: alembic upgrade head && alembic check && alembic downgrade base

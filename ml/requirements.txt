@@ -1,0 +1,7 @@
+# ML environment for training (separate from the service). GPU: install the CUDA build of torch.
+torch>=2.4
+transformers>=4.46
+trl>=0.12
+peft>=0.13
+datasets>=3.0
+accelerate>=1.0

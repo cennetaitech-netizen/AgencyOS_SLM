@@ -6,3 +6,7 @@ __pycache__/
 .env
 *.egg-info/
 dist/
+.venv-ml/
+ml/runs/
+evals/models.json
+evals/models.ci.json

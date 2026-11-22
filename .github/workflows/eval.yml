@@ -1,0 +1,60 @@
+name: eval
+
+# Runs the full-engine eval against a real model whenever prompts, tools, the model client or the eval set
+# change, and blocks the PR if a target is missed (overall, actions, grounding, no execution without confirm).
+# Needs repository secrets: EVAL_MODEL_BASE_URL, EVAL_MODEL_NAME, EVAL_MODEL_API_KEY. Skips if they're absent.
+
+on:
+  pull_request:
+    paths:
+      - "chat_service/engine/**"
+      - "chat_service/tools/**"
+      - "chat_service/actions/**"
+      - "chat_service/llm/**"
+      - "evals/**"
+
+jobs:
+  engine-eval:
+    runs-on: ubuntu-latest
+    env:
+      EVAL_MODEL_BASE_URL: ${{ secrets.EVAL_MODEL_BASE_URL }}
+      EVAL_MODEL_NAME: ${{ secrets.EVAL_MODEL_NAME }}
+      EVAL_MODEL_API_KEY: ${{ secrets.EVAL_MODEL_API_KEY }}
+      CHAT_EVAL_DATABASE_URL: postgresql+asyncpg://chat:chat@localhost:5432/chat_eval
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: chat
+          POSTGRES_PASSWORD: chat
+          POSTGRES_DB: chat_eval
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chat" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - name: Skip when no eval model is configured
+        if: env.EVAL_MODEL_BASE_URL == ''
+        run: echo "EVAL_MODEL_* secrets not set; skipping the engine eval."
+      - uses: actions/checkout@v4
+        if: env.EVAL_MODEL_BASE_URL != ''
+      - uses: actions/setup-python@v5
+        if: env.EVAL_MODEL_BASE_URL != ''
+        with:
+          python-version: "3.12"
+      - if: env.EVAL_MODEL_BASE_URL != ''
+        run: pip install -e ".[dev]"
+      - name: Engine eval (fails the job if the gate isn't met)
+        if: env.EVAL_MODEL_BASE_URL != ''
+        run: |
+          python - <<'EOF'
+          import json, os
+          json.dump([{"label": os.environ["EVAL_MODEL_NAME"], "base_url": os.environ["EVAL_MODEL_BASE_URL"],
+                      "model": os.environ["EVAL_MODEL_NAME"], "api_key_env": "EVAL_MODEL_API_KEY"}],
+                    open("evals/models.ci.json", "w"))
+          EOF
+          python -m chat_service.evals.engine_eval --models evals/models.ci.json --out eval-report.md
+      - uses: actions/upload-artifact@v4
+        if: always() && env.EVAL_MODEL_BASE_URL != ''
+        with:
+          name: eval-report
+          path: eval-report.md
