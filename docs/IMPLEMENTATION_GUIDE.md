@@ -1,7 +1,12 @@
-# AgencyOS Chat — Implementation Guide for the AI Coding Agent (Stage 1: Lean MVP)
+# AgencyOS Chat — Implementation Guide for the AI Coding Agent (Release 1.0: Pilot → Commercial Launch)
 
 > **Audience:** an AI coding agent (e.g., Claude Code or similar) working **inside the AgencyOS product repository**, supervised by our engineers.
-> **Goal:** add a **read-only, media-campaign-only chat assistant** to AgencyOS. It runs on an open small language model (SLM) and is billed from a **prepaid token wallet** with a **free trial grant**.
+> **Goal:** a **complete, sellable chat product** inside AgencyOS. Clients perform media-campaign activities by chat (read, analyse, draft, **and act, with confirmation**) on **our own media-campaign SLM**. They're billed by **token consumption** with **free and paid caps**, **subscriptions, overage and tax-compliant invoices**.
+>
+> **Milestones**
+> - **M1, Pilot (Phases 0–8):** read-only chat, prepaid wallet, free trial, shadow billing, 5 pilot orgs. *Not sold.*
+> - **M2, Commercial launch (Phases 9–12):** chat actions with confirmation, subscription plans with caps/overage/monthly invoicing, fine-tuned media-campaign SLM, launch hardening. **Sold only after M2's go/no-go.**
+> - **Business readiness** runs in parallel. Drafts are in [`business/`](business/), and M2 can't launch until they're signed off.
 > **Background docs (read for context, don't implement beyond Stage 1):** `LEAN_MVP.md`, `CHAT_ENGINE_SLM_PLAN.md`, `TOKEN_CAPS_AND_INVOICING.md`, `BUILD_READINESS.md`.
 
 ---
@@ -44,6 +49,11 @@
 | Help-centre / product documentation source (for "how do I…" questions) | `TODO` or "none" | Phase 3 |
 | Product analytics tool (e.g., Mixpanel, Amplitude, GA4, PostHog) | `TODO` | Phase 7 |
 | Billing mode at pilot start | default **`shadow`** (count and show tokens, don't deduct) | Phase 1 |
+| **Write actions to support** and their **risk tier** (1 low / 2 medium / 3 high), approved by the product owner | `TODO` (from the Phase 0 write inventory) | Phase 9 |
+| **Action safety rules** per org: max budget change % per action, max absolute change, second-approver threshold, daily chat-initiated spend-change cap | defaults: **30%**, `TODO` amount, `TODO` amount, `TODO` amount | Phase 9 |
+| **Plan catalogue:** plans, monthly included tokens, overage on/off, price per 1M billable tokens, plan fees | `TODO` (from [business/GOVERNANCE_AND_PRICING.md](business/GOVERNANCE_AND_PRICING.md)) | Phase 10 |
+| **ML engineer** (hire or contract) and **teacher model** for synthetic data (terms allow training use) | `TODO` | Phase 11 |
+| Launch SLOs (availability, p95 latency) and on-call owner | defaults: **99.5%**, p95 first token **< 1.5 s** | Phase 12 |
 
 ---
 
@@ -51,7 +61,7 @@
 
 1. **Follow the existing codebase.** Use the product's language, framework, ORM, migration tool, test framework, lint rules and folder conventions. If there are no conventions (e.g., a new service), use the defaults in Section 3.
 2. **Never invent endpoints, fields or business logic.** Every tool must map to a real, existing endpoint or service function you have found in the code. If something is missing, **list it as a gap and ask**. Don't create it silently.
-3. **Read-only in Stage 1.** Tools may only call **read** operations (HTTP GET or service functions that don't modify data). No create/update/delete/launch/pause/budget-change tools. The tool registry must enforce this (Section 5.3).
+3. **Read-only until Phase 9.** In Phases 0–8, tools may only call **read** operations (HTTP GET or service functions that don't modify data), and the registry enforces this (Section 5.3). From Phase 9, write operations are allowed **only through the confirmation flow in Phase 9**. **The model never executes a write.** It can only *propose* one, and execution happens when a permitted human confirms.
 4. **Act as the user.** Every product call uses the **requesting user's own credentials/permissions**. Never use a service/admin account to fetch data for a user.
 5. **Money safety.** A wallet balance must never go below zero. Failed replies are never charged. All wallet changes happen in database transactions and are covered by tests, including concurrency tests.
 6. **No secrets in code, logs or test fixtures.** Use environment variables / the secrets manager. Never log user auth tokens or payment payload secrets.
@@ -310,6 +320,128 @@ Chat Service  (module inside the product backend, OR a separate service if the p
 - [ ] AI disclaimer, "What is a token?" explainer and support FAQ published.
 - [ ] Pilot starts in **shadow billing**; switch orgs to **live** only after 2–4 weeks, once the price per token is set from the overhead ratio and margin data.
 - [ ] **Pilot success criteria agreed** (suggested): ≥ 60% of pilot users chat weekly; ≥ 70% of rated answers are 👍; **zero** confirmed wrong-number incidents; gross margin per billable token ≥ finance target; at least 2 pilot orgs willing to buy packs at the proposed price.
+
+**🛑 CHECKPOINT 8 = Milestone M1 (pilot) go-live.** The pilot runs in shadow billing while Phases 9–12 are built. Pilot conversations from consenting orgs become Phase 11 training data.
+
+---
+
+### Phase 9 — Chat actions with confirmation (write operations)
+
+**Principle:** the model *proposes*, a human *confirms*, and the **chat service executes**. The model never holds the ability to execute.
+
+**Tasks**
+1. Extend `DISCOVERY.md` with a **write-operation inventory** (create/update/pause/resume/launch/delete, budgets, bids, targeting, schedules, creatives, plan approval). For each: endpoint, permissions, reversibility, and the proposed risk tier. **🛑 Mini-checkpoint:** product owner approves the list and tiers (Section 1).
+2. Registry: write tools are declared with `read_only: false`, `risk_tier: 1|2|3`, `reversible: bool`, `undo_tool` (if reversible) and `preview_tool` (a read call that returns the current state). Tier 2–3 tools **always** need confirmation; tier 1 needs confirmation by default (configurable per org).
+3. **Proposal flow:**
+   - The model calls the write tool. The engine **doesn't execute**. It validates the args (schema + business rules), calls `preview_tool` to capture the **before** state, computes the **after** state, and stores a `chat_actions` row (`proposed`, expires in 10 minutes).
+   - SSE event `action.proposed` with a confirmation card: action, target, before → after, risk tier, any rule warnings.
+   - The model receives `{"status": "awaiting_user_confirmation", "action_id": ...}` and tells the user to review the card.
+4. **Confirmation endpoint** `POST /chat/actions/{id}/confirm` (and `/cancel`). On confirm, the service:
+   1. checks that the confirmer is the requester, or holds the approver role
+   2. re-checks permissions *now*
+   3. re-reads the current state, and rejects with "changed since preview, please review again" if it differs from the stored before state
+   4. re-applies the business rules
+   5. executes with an **idempotency key** = `action_id`
+   6. stores the result
+   7. returns a **template summary** ("Done: Meta budget for *Campaign X* changed from 5,000 to 6,000 INR"), so confirming costs **no tokens**
+5. **Business rules engine** (per org, from Section 1): max % and absolute budget change, blocked actions, allowed roles per tier, **second approval** above a threshold (`awaiting_second_approval` → approver notified in-app and by email → approve/reject), and a **daily cap** on chat-initiated spend changes.
+6. **Undo:** for reversible actions, show **Undo** for 24 hours if the target hasn't changed since. Undo is itself an action that goes through confirmation.
+7. **Kill switches:** `CHAT_WRITE_ACTIONS_ENABLED_GLOBAL` and per-org `write_actions_enabled`. With either off, write tools are hidden from the model.
+8. Platform/API errors: show the error on the card, mark the action `failed`, and never retry automatically on tier 2–3.
+9. Update the system prompt (`system_v2`): the model may propose actions, must state exactly what will change, and never claims an action is done until the engine reports `executed`.
+
+```sql
+CREATE TABLE chat_actions (
+  action_id UUID PRIMARY KEY, org_id UUID NOT NULL, conversation_id UUID NOT NULL, message_id UUID NOT NULL,
+  requested_by UUID NOT NULL, tool_name TEXT NOT NULL, risk_tier INT NOT NULL, args JSONB NOT NULL,
+  before_state JSONB, proposed_after JSONB, rule_warnings JSONB,
+  status TEXT NOT NULL CHECK (status IN ('proposed','awaiting_second_approval','confirmed','executing',
+                                         'executed','failed','cancelled','expired','rejected','undone')),
+  confirmed_by UUID, second_approved_by UUID, executed_at TIMESTAMPTZ,
+  platform_response JSONB, undo_of UUID, expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE chat_action_rules (
+  org_id UUID PRIMARY KEY, write_actions_enabled BOOLEAN NOT NULL DEFAULT false,
+  max_budget_change_pct NUMERIC NOT NULL DEFAULT 30, max_budget_change_abs_minor BIGINT,
+  second_approval_above_minor BIGINT, daily_spend_change_cap_minor BIGINT,
+  tier1_requires_confirmation BOOLEAN NOT NULL DEFAULT true,
+  roles_by_tier JSONB NOT NULL, blocked_tools TEXT[] NOT NULL DEFAULT '{}'
+);
+```
+
+**Tests (all required)**
+- Nothing executes without a confirm call; the model output alone can never trigger execution, including through prompt injection in tool results or documents.
+- Double-click confirm executes once; an expired or cancelled action can't be confirmed.
+- Stale preview is rejected; permission revoked between propose and confirm is rejected.
+- Thresholds, blocked tools, second approval and the daily cap all enforced; the approver can't be the requester.
+- Undo works only while the state is unchanged; kill switches hide the write tools immediately.
+- Eval set extended with 30+ action cases: correct tool, correct args, correct before → after.
+
+**🛑 CHECKPOINT 9:** human code review + product owner tests every action in staging with real test ad accounts.
+
+---
+
+### Phase 10 — Subscription plans, caps, overage and monthly invoicing
+
+Implement [TOKEN_CAPS_AND_INVOICING.md](TOKEN_CAPS_AND_INVOICING.md) on top of the Phase 1 wallet.
+
+**Decisions fixed for Release 1** (simple for marketers, easy to invoice):
+- **One price per billable token** (input and output combined). Invoices still *show* the input/output split for transparency.
+- Plans from the catalogue in Section 1: Free trial · Starter · Pro/Agency · Enterprise, plus top-up packs.
+
+**Tasks**
+1. Tables: `plans`, `subscriptions`, `usage_caps` (from TOKEN_CAPS_AND_INVOICING.md §4), plus `chat_invoices` and `chat_invoice_lines`. Add `workspace_id` and `client_id` (the active brand/client from tool context) to usage events for per-brand breakdowns.
+2. **Monthly allowance bucket** created at each cycle start (`source = 'plan_monthly'`, expires at cycle end, no rollover). Consumption order: free → monthly → top-up → **overage**.
+3. **Overage** (plans with `overage_allowed`): when the buckets are empty, reservations draw on an overage allowance = (org spend limit − overage already used this cycle) ÷ price. Usage is recorded against an `overage` pseudo-bucket and invoiced in arrears. A hard stop at the spend limit.
+4. **Caps** at org / workspace / user level, per day or month, checked inside `reserve`. Alerts at 50/80/90/100% (in-app + email to admins).
+5. **Cycle close job:** freeze the period → compute overage → apply credits → create the invoice (plan fee in advance + overage in arrears, input/output split, per-workspace/brand breakdown, tax from the billing profile) → generate the usage CSV → push to the payment provider's invoicing or our accounting system (per Section 1) → email admins.
+6. **Reconciliation job:** invoice totals == ledger totals to the micro-unit; mismatches block sending and alert finance.
+7. **Plan changes:** upgrades are immediate with proration and the new allowance added at once; downgrades take effect at the next cycle. Price-book versioning: rate changes apply from the next cycle only.
+8. **Dunning:** payment failed → retries → 7-day grace → chat becomes read-only → suspended. The free trial is unaffected.
+9. Client UI: plan & billing page (plan, cycle, allowance used, forecast end-of-cycle usage), caps settings, usage by user/workspace/brand, invoices and usage CSV download, upgrade/downgrade.
+
+**Tests:** all 10 cases in TOKEN_CAPS_AND_INVOICING.md §7, plus: overage stops exactly at the spend limit; monthly bucket expires at cycle end; dunning transitions; an invoice reconciles with the ledger; a per-brand breakdown sums to the invoice total.
+
+**🛑 CHECKPOINT 10:** finance runs **one full simulated billing cycle in staging** and signs off invoices, tax lines and reconciliation.
+
+---
+
+### Phase 11 — Our own media-campaign SLM (fine-tuning)
+
+**Tasks**
+1. **Dataset builder** (`ml/datasets/`):
+   - consented pilot conversations, with their tool calls and results (`training_consent = true` orgs only)
+   - down-rated answers corrected by the media SME
+   - synthetic conversations from the teacher model for every tool and action, **executed against the sandbox**, keeping only those that succeed
+   - refusal examples and action-proposal examples
+   - PII scrub, de-duplication, versioned dataset snapshots, train/validation split
+   - the **frozen eval set is never trained on**
+2. **Training** (`ml/train/`): LoRA SFT on the **same base model family** chosen in Phase 2, then DPO from feedback pairs (👍 vs corrected 👎). Experiment tracking. A model card per version.
+3. **Shorter prompt:** move behaviours into the model and cut the system prompt (target: **≥ 50% fewer prompt tokens**), so the **overhead ratio** falls and margin rises.
+4. **Release gate**, compared with the current production model on the full eval set:
+   - tool selection, argument accuracy, action proposals and refusals **equal or better**
+   - grounding (numbers from tools) **100%**
+   - overhead ratio and p95 latency **equal or better**
+5. **Serving:** deploy the LoRA on the chosen host (or self-hosted vLLM). **Canary rollout** 10% → 50% → 100% of orgs, with automatic rollback if eval, error rate or 👎 rate regresses. Per-org model pinning.
+6. **Retraining cadence:** monthly pipeline run → gate → canary.
+
+**🛑 CHECKPOINT 11:** ML engineer + SME sign the eval report; the fine-tuned model is promoted to 100%.
+
+---
+
+### Phase 12 — Commercial launch readiness
+
+**Tasks / checklist**
+- [ ] **Security:** external penetration test of the chat, actions and billing endpoints; findings fixed; dependency and secret scanning in CI; access review for admin tools.
+- [ ] **Performance:** load test at **3× expected launch peak**; host/GPU capacity plan; autoscaling verified.
+- [ ] **Reliability:** SLOs from Section 1 monitored; status page; on-call rotation; runbooks from [business/SUPPORT_PILOT_LAUNCH_KIT.md](business/SUPPORT_PILOT_LAUNCH_KIT.md) tested in a game-day.
+- [ ] **Billing:** pilot orgs switched to **live** for at least **one full real billing cycle**, invoices issued and reconciled with **zero discrepancies**.
+- [ ] **Quality:** eval pass rate ≥ 90% (reads) and ≥ 95% (action proposals); zero open Sev-1/Sev-2 incidents.
+- [ ] **Business readiness:** every item in [business/](business/) approved by its owner (legal terms live, pricing page live, support trained, sales enabled).
+- [ ] **Go/no-go meeting** with all owners in [business/GOVERNANCE_AND_PRICING.md](business/GOVERNANCE_AND_PRICING.md). The decision is recorded in the decision log.
+
+**🛑 CHECKPOINT 12 = Milestone M2: commercial launch (general availability).**
 
 ---
 
@@ -627,7 +759,9 @@ event: error           data: {"code": "insufficient_tokens|daily_limit_reached|r
 
 ---
 
-## 8. Definition of Done (Stage 1)
+## 8. Definition of Done
+
+### 8.1 Milestone M1: Pilot (Phases 0–8)
 
 1. Pilot users can ask, in plain language, about their clients, campaigns, performance, pacing, creatives and audiences, and get correct answers built **only** from their own AgencyOS data.
 2. The chat refuses non-media topics and never changes any data.
@@ -639,4 +773,12 @@ event: error           data: {"code": "insufficient_tokens|daily_limit_reached|r
 8. The model never does arithmetic or counts characters itself; dates, timezone and currency come from the context block; answers state data freshness.
 9. Feedback, retention/deletion, consent flag, shadow/live billing mode, tax-compliant invoices and refund handling are in place.
 
-**Out of scope for Stage 1** (don't build): write actions, subscriptions/overage/monthly invoices, per-user caps, file uploads, fine-tuning, multi-language tuning, Slack/Teams. These belong to Stages 2–5 in `LEAN_MVP.md`.
+### 8.2 Milestone M2: Commercial launch (Phases 9–12). This is the sellable product
+1. Clients can **perform media-campaign activities by chat**: ask, analyse, draft, and **act** (budgets, pause/resume, launch, edits), with confirmation cards, rules, second approval, undo, audit and kill switches.
+2. The chat runs on **our own fine-tuned media-campaign SLM**, promoted through the eval gate and canary rollout.
+3. **Free and paid token caps:** free trial (with daily ceiling), monthly plan allowances, top-ups, overage up to the client's spend limit, and org/workspace/user caps with alerts.
+4. **Invoicing on token consumption:** monthly invoices (plan fee + overage), per-brand breakdown, usage CSV, tax-compliant invoices, reconciliation, proration, dunning, refunds.
+5. Security test passed, load-tested at 3× peak, SLOs monitored, on-call in place, one full live billing cycle reconciled.
+6. All business-readiness items in `business/` approved; go/no-go recorded.
+
+**Out of scope for Release 1.0** (roadmap after launch): Slack/Teams/WhatsApp channels, file uploads (PDF briefs), multi-language tuning, private/on-prem deployment, SSO/SCIM, per-client custom adapters.

@@ -79,6 +79,26 @@ Priority: 🔴 must resolve before or during build · 🟠 before pilot · 🟢 
 | 🟡 **Build provides the mechanism; people supply the input** | A1 (finance sets the price from the data), A5 (product decides on signup verification), B1 (finance picks the invoicing route), B4 (legal signs the host DPA), B5 (legal writes the consent clause), B7 (legal approves the disclaimer and terms), C4 (needs help-centre content), C10 (depends on product API scoping), D4 (people run the security review), D5 (choice of host and model) | Closed only when the Section 1 inputs are filled and the human tasks are done |
 | ❌ **Not solved by code** | A6, B3, E1–E7 | Leadership, finance, legal, sales and support work |
 
+### Update: full-solve coverage (Release 1.0)
+Every 🟡 and ❌ item now has either a build phase or a **ready draft**, so the remaining human work is **review and sign-off**, not creation:
+
+| Gap | Covered by |
+|---|---|
+| A1, A6 (pricing) | `business/GOVERNANCE_AND_PRICING.md` §4: cost floor, value pricing, plan structure, the steps to set the price from shadow data |
+| A5 (free-trial abuse) | Phase 1 daily ceiling + Phase 0 signup check; product decision D2 |
+| B1, B3 (tax invoice, expiry/refunds) | Phase 6/10 build + `business/LEGAL_AND_FINANCE_DRAFTS.md` §7–9 |
+| B4, B5, B7 (DPA, consent, disclaimer, terms) | `business/LEGAL_AND_FINANCE_DRAFTS.md` §1–6 |
+| C4 (help content) | Phase 3 tool; content owner in the RACI |
+| D4 (security review) | Phase 8 review + Phase 12 external penetration test |
+| E1, E2 (owners, budget, timeline) | `business/GOVERNANCE_AND_PRICING.md` §1–3 |
+| E3 (pilot) | `business/SUPPORT_PILOT_LAUNCH_KIT.md` §2 |
+| E4, E6 (support, incidents) | `business/SUPPORT_PILOT_LAUNCH_KIT.md` §1 |
+| E5 (launch materials) | `business/SUPPORT_PILOT_LAUNCH_KIT.md` §3 |
+| E7 (Stage 2 data) | Phase 11 dataset builder (consented pilot data + sandbox-validated synthetic data) |
+| "Chat must perform all activities" | Phase 9 (actions with confirmation) |
+| "Invoice on token consumption, free + paid caps" | Phase 1 + 6 (wallet, free trial, packs) and Phase 10 (plans, caps, overage, monthly invoices) |
+| "Our own media-campaign SLM" | Phase 11 (fine-tuning, eval gate, canary) |
+
 ### Risks that remain even after a complete build
 1. **Small-model quality is unproven.** Phase 2 tests it before most of the build; if it fails, use a larger model, fewer tools, or simpler tool descriptions.
 2. **The overhead ratio may force a high price per token.** Levers: shorter system prompt, fewer tools per turn, prompt caching on the host, self-hosting at higher volume, and Stage 2 fine-tuning (a tuned model needs shorter instructions).
