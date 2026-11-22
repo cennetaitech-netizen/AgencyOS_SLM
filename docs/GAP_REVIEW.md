@@ -71,6 +71,23 @@ Priority: 🔴 must resolve before or during build · 🟠 before pilot · 🟢 
 
 ---
 
+## Will this build close the gaps?
+
+| Coverage | Gaps | Condition |
+|---|---|---|
+| ✅ **Closed by the build** | A2, A3, A4, B2, B6, C1, C2, C3, C5, C6, C7, C8, C9, D1, D2, D3, D6, D7 | The agent implements the phase, the tests pass, and a human reviews the checkpoint |
+| 🟡 **Build provides the mechanism; people supply the input** | A1 (finance sets the price from the data), A5 (product decides on signup verification), B1 (finance picks the invoicing route), B4 (legal signs the host DPA), B5 (legal writes the consent clause), B7 (legal approves the disclaimer and terms), C4 (needs help-centre content), C10 (depends on product API scoping), D4 (people run the security review), D5 (choice of host and model) | Closed only when the Section 1 inputs are filled and the human tasks are done |
+| ❌ **Not solved by code** | A6, B3, E1–E7 | Leadership, finance, legal, sales and support work |
+
+### Risks that remain even after a complete build
+1. **Small-model quality is unproven.** Phase 2 tests it before most of the build; if it fails, use a larger model, fewer tools, or simpler tool descriptions.
+2. **The overhead ratio may force a high price per token.** Levers: shorter system prompt, fewer tools per turn, prompt caching on the host, self-hosting at higher volume, and Stage 2 fine-tuning (a tuned model needs shorter instructions).
+3. **Clients may not like token pricing.** Shadow billing shows this before money changes hands; credits or plans with included tokens are the fallback.
+4. **Wrong answers are reduced, not eliminated.** The disclaimer, feedback, weekly review and read-only scope limit the impact.
+5. **Dependence on a third-party model host** until Stage 2 self-hosting.
+
+**Proof of closure:** every ✅ and 🟡 item maps to a test or checklist line in `IMPLEMENTATION_GUIDE.md` (Phases 1–8). A gap counts as closed only when its test passes or its Phase 8 checklist item is ticked.
+
 ## Top 5 to act on now
 1. **Measure the hidden cost per message (A1) and start with shadow billing (A2).** Otherwise pricing is a guess.
 2. **Legal:** model host DPA and data terms (B4), training-consent clause (B5), AI disclaimer and terms (B7).
