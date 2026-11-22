@@ -26,7 +26,9 @@ from chat_service.db.schema import (
     chat_bucket_debits,
     chat_credit_buckets,
     chat_payments,
+    chat_plans,
     chat_reservations,
+    chat_subscriptions,
     chat_token_packs,
     chat_usage_events,
     chat_wallets,
@@ -82,6 +84,7 @@ class Reservation:
     conversation_id: uuid.UUID
     message_id: uuid.UUID
     tokens_reserved: int
+    overage_reserved: int = 0
 
 
 @dataclass
@@ -379,23 +382,105 @@ class WalletService:
                 .values(tokens_reserved=chat_wallets.c.tokens_reserved + tokens, updated_at=now)
                 .returning(chat_wallets.c.org_id)
             )
-            if held.first() is None:
+            if held.first() is not None:
+                reservation_id = await self._insert_reservation(
+                    conn, org_id, user_id, conversation_id, message_id, tokens, 0, now
+                )
+                return Reservation(reservation_id, org_id, user_id, conversation_id, message_id, tokens)
+        return await self._reserve_with_overage(org_id, user_id, conversation_id, message_id, tokens, now)
+
+    async def _insert_reservation(self, conn, org_id, user_id, conversation_id, message_id, tokens, overage, now):
+        reservation_id = uuid.uuid4()
+        await conn.execute(
+            chat_reservations.insert().values(
+                reservation_id=reservation_id,
+                org_id=org_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                tokens_reserved=tokens,
+                overage_reserved=overage,
+                status="held",
+                created_at=now,
+                expires_at=now + timedelta(seconds=self.settings.reservation_ttl_seconds),
+            )
+        )
+        return reservation_id
+
+    async def _reserve_with_overage(self, org_id, user_id, conversation_id, message_id, tokens, now):
+        """Buckets can't cover ``tokens``: use post-paid overage, up to the client's spend limit.
+
+        Serialised per org by locking the subscription row, so parallel requests can't exceed the limit.
+        """
+        async with self.engine.begin() as conn:
+            sub = (
+                await conn.execute(
+                    select(chat_subscriptions).where(chat_subscriptions.c.org_id == org_id).with_for_update()
+                )
+            ).first()
+            if sub is None:
                 return None
-            reservation_id = uuid.uuid4()
+            plan = (await conn.execute(select(chat_plans).where(chat_plans.c.plan_id == sub.plan_id))).one()
+            if not _overage_open(sub, plan):
+                return None
+            await self._ensure_wallet(conn, org_id)
+            wallet = (
+                await conn.execute(select(chat_wallets).where(chat_wallets.c.org_id == org_id).with_for_update())
+            ).one()
+            bucket_part = max(0, min(wallet.tokens_available - wallet.tokens_reserved, tokens))
+            overage_part = tokens - bucket_part
+            if overage_part > await self._overage_capacity(conn, org_id, sub, plan):
+                return None
+            if bucket_part:
+                await conn.execute(
+                    update(chat_wallets)
+                    .where(chat_wallets.c.org_id == org_id)
+                    .values(tokens_reserved=chat_wallets.c.tokens_reserved + bucket_part, updated_at=now)
+                )
+            reservation_id = await self._insert_reservation(
+                conn, org_id, user_id, conversation_id, message_id, tokens, overage_part, now
+            )
+        return Reservation(reservation_id, org_id, user_id, conversation_id, message_id, tokens, overage_part)
+
+    @staticmethod
+    async def _overage_capacity(conn: AsyncConnection, org_id: uuid.UUID, sub, plan) -> int:
+        """Overage tokens still available this period: spend limit − used − held by in-flight requests."""
+        limit_tokens = sub.spend_limit_minor * 1_000_000 // plan.price_per_1m_tokens_minor
+        used = (
             await conn.execute(
-                chat_reservations.insert().values(
-                    reservation_id=reservation_id,
-                    org_id=org_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                    tokens_reserved=tokens,
-                    status="held",
-                    created_at=now,
-                    expires_at=now + timedelta(seconds=self.settings.reservation_ttl_seconds),
+                select(func.coalesce(func.sum(chat_usage_events.c.overage_tokens), 0)).where(
+                    chat_usage_events.c.org_id == org_id,
+                    chat_usage_events.c.occurred_at >= sub.current_period_start,
+                    chat_usage_events.c.occurred_at < sub.current_period_end,
                 )
             )
-        return Reservation(reservation_id, org_id, user_id, conversation_id, message_id, tokens)
+        ).scalar_one()
+        held = (
+            await conn.execute(
+                select(func.coalesce(func.sum(chat_reservations.c.overage_reserved), 0)).where(
+                    chat_reservations.c.org_id == org_id, chat_reservations.c.status == "held"
+                )
+            )
+        ).scalar_one()
+        return max(0, int(limit_tokens) - int(used) - int(held))
+
+    async def capacity(self, org_id: uuid.UUID) -> int:
+        """Tokens the org can spend right now: bucket balance + remaining overage allowance."""
+        bal = await self.get_balance(org_id)
+        async with self.engine.connect() as conn:
+            sub = (await conn.execute(select(chat_subscriptions).where(chat_subscriptions.c.org_id == org_id))).first()
+            if sub is None:
+                return bal.spendable
+            plan = (await conn.execute(select(chat_plans).where(chat_plans.c.plan_id == sub.plan_id))).one()
+            if not _overage_open(sub, plan):
+                return bal.spendable
+            return bal.spendable + await self._overage_capacity(conn, org_id, sub, plan)
+
+    async def add_bucket_in(
+        self, conn: AsyncConnection, org_id: uuid.UUID, source: str, tokens: int, expires_at: datetime | None
+    ) -> uuid.UUID:
+        """Add a credit bucket inside the caller's transaction (used by the subscription service)."""
+        return await self._add_bucket(conn, org_id, source, tokens, expires_at)
 
     async def _lock_held(self, conn: AsyncConnection, reservation_id: uuid.UUID):
         return (
@@ -411,6 +496,7 @@ class WalletService:
         charged: int,
         status: str,
         reason: str | None,
+        overage_tokens: int = 0,
     ) -> dict:
         org_id, user_id, conversation_id, message_id = ids
         return dict(
@@ -424,6 +510,7 @@ class WalletService:
             billable_input_tokens=usage.billable_input_tokens,
             billable_output_tokens=usage.billable_output_tokens,
             tokens_charged=charged,
+            overage_tokens=overage_tokens,
             billing_tokenizer_version=usage.billing_tokenizer_version,
             host_prompt_tokens=usage.host_prompt_tokens,
             host_completion_tokens=usage.host_completion_tokens,
@@ -452,18 +539,23 @@ class WalletService:
                 raise WalletError(f"reservation is {res.status}, can't settle")
 
             charge = max(0, min(usage.billable_total, res.tokens_reserved))
+            bucket_part = res.tokens_reserved - res.overage_reserved
+            bucket_charge = min(charge, bucket_part)
+            overage_charge = charge - bucket_charge
             await conn.execute(
                 update(chat_wallets)
                 .where(chat_wallets.c.org_id == res.org_id)
                 .values(
-                    tokens_available=chat_wallets.c.tokens_available - charge,
-                    tokens_reserved=chat_wallets.c.tokens_reserved - res.tokens_reserved,
+                    tokens_available=chat_wallets.c.tokens_available - bucket_charge,
+                    tokens_reserved=chat_wallets.c.tokens_reserved - bucket_part,
                     updated_at=self.clock(),
                 )
             )
-            await self._debit_buckets(conn, res.org_id, res.message_id, charge)
+            await self._debit_buckets(conn, res.org_id, res.message_id, bucket_charge)
             await conn.execute(
-                chat_usage_events.insert().values(**self._usage_values(_ids(res), usage, charge, "charged", None))
+                chat_usage_events.insert().values(
+                    **self._usage_values(_ids(res), usage, charge, "charged", None, overage_charge)
+                )
             )
             await conn.execute(
                 update(chat_reservations)
@@ -521,7 +613,7 @@ class WalletService:
                 update(chat_wallets)
                 .where(chat_wallets.c.org_id == res.org_id)
                 .values(
-                    tokens_reserved=chat_wallets.c.tokens_reserved - res.tokens_reserved,
+                    tokens_reserved=chat_wallets.c.tokens_reserved - (res.tokens_reserved - res.overage_reserved),
                     updated_at=self.clock(),
                 )
             )
@@ -583,7 +675,9 @@ class WalletService:
                 await conn.execute(
                     update(chat_wallets)
                     .where(chat_wallets.c.org_id == res.org_id)
-                    .values(tokens_reserved=chat_wallets.c.tokens_reserved - res.tokens_reserved)
+                    .values(
+                        tokens_reserved=chat_wallets.c.tokens_reserved - (res.tokens_reserved - res.overage_reserved)
+                    )
                 )
                 await conn.execute(
                     update(chat_reservations).where(chat_reservations.c.reservation_id == rid).values(status="expired")
@@ -704,3 +798,13 @@ class WalletService:
                 )
             ).scalar_one()
         return int(available) == int(remaining)
+
+
+def _overage_open(sub, plan) -> bool:
+    return (
+        sub.status == "active"
+        and plan.overage_allowed
+        and sub.spend_limit_minor is not None
+        and sub.spend_limit_minor > 0
+        and bool(plan.price_per_1m_tokens_minor)
+    )

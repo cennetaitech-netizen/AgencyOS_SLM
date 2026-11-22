@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    Sequence,
     String,
     Table,
     Text,
@@ -96,10 +97,12 @@ chat_reservations = Table(
     Column("conversation_id", UUID(as_uuid=True), nullable=False),
     Column("message_id", UUID(as_uuid=True), nullable=False, unique=True),
     Column("tokens_reserved", BigInteger, nullable=False),
+    Column("overage_reserved", BigInteger, nullable=False, server_default="0"),  # part beyond the buckets
     Column("status", String(16), nullable=False),
     _ts("created_at"),
     _ts("expires_at", default_now=False),
     CheckConstraint("tokens_reserved > 0", name="reserved_positive"),
+    CheckConstraint("overage_reserved >= 0 AND overage_reserved <= tokens_reserved", name="overage_within"),
     CheckConstraint("status IN ('held','settled','released','expired')", name="status_valid"),
 )
 
@@ -117,6 +120,7 @@ chat_usage_events = Table(
     Column("billable_input_tokens", Integer, nullable=False),
     Column("billable_output_tokens", Integer, nullable=False),
     Column("tokens_charged", Integer, nullable=False),
+    Column("overage_tokens", Integer, nullable=False, server_default="0"),  # part of tokens_charged billed as overage
     Column("billing_tokenizer_version", String(64), nullable=False),
     Column("host_prompt_tokens", Integer, nullable=True),
     Column("host_completion_tokens", Integer, nullable=True),
@@ -296,6 +300,10 @@ chat_actions = Table(
     _ts("executed_at", nullable=True, default_now=False),
     Column("platform_response", JSONB, nullable=True),
     Column("undo_of", UUID(as_uuid=True), nullable=True),
+    Column("target_id", String(128), nullable=True),
+    Column("spend_change_minor", BigInteger, nullable=False, server_default="0"),
+    Column("requires_second_approval", Boolean, nullable=False, server_default="false"),
+    Column("error", Text, nullable=True),
     _ts("expires_at", default_now=False),
     _ts("created_at"),
     CheckConstraint("risk_tier IN (1,2,3)", name="tier_valid"),
@@ -344,8 +352,10 @@ chat_subscriptions = Table(
     Column("plan_id", String(64), ForeignKey("chat_plans.plan_id"), nullable=False),
     _ts("current_period_start", default_now=False),
     _ts("current_period_end", default_now=False),
-    Column("spend_limit_minor", BigInteger, nullable=True),
+    Column("spend_limit_minor", BigInteger, nullable=True),  # overage hard stop; NULL = no overage
     Column("status", String(16), nullable=False),
+    Column("pending_plan_id", String(64), ForeignKey("chat_plans.plan_id"), nullable=True),  # downgrade at renewal
+    _ts("past_due_since", nullable=True, default_now=False),
     Column("provider_subscription_id", String(255), nullable=True),
     _ts("updated_at"),
     CheckConstraint("status IN ('active','past_due','suspended','cancelled')", name="status_valid"),
@@ -378,9 +388,14 @@ chat_invoices = Table(
     Column("tax_minor", BigInteger, nullable=False, server_default="0"),
     Column("total_minor", BigInteger, nullable=False),
     Column("status", String(16), nullable=False),
+    Column("kind", String(32), nullable=False, server_default="cycle"),
+    Column("overage_tokens", BigInteger, nullable=False, server_default="0"),
+    _ts("reconciled_at", nullable=True, default_now=False),
+    Column("approved_by", UUID(as_uuid=True), nullable=True),
     Column("provider_invoice_id", String(255), nullable=True),
     _ts("created_at"),
     CheckConstraint("status IN ('draft','approved','sent','paid','void')", name="status_valid"),
+    CheckConstraint("kind IN ('cycle','subscription_start','proration')", name="kind_valid"),
 )
 
 chat_invoice_lines = Table(
@@ -400,4 +415,18 @@ chat_invoice_lines = Table(
     Column("unit_price_minor", BigInteger, nullable=True),
     Column("amount_minor", BigInteger, nullable=False),
     Column("breakdown", JSONB, nullable=True),
+)
+
+invoice_number_seq = Sequence("chat_invoice_number_seq", metadata=metadata)
+
+chat_usage_alerts = Table(
+    "chat_usage_alerts",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("org_id", UUID(as_uuid=True), nullable=False),
+    Column("scope", String(64), nullable=False),  # e.g. plan_allowance, cap:<cap_id>, spend_limit
+    Column("period_key", String(32), nullable=False),  # e.g. 2026-11 or 2026-11-22
+    Column("threshold", Integer, nullable=False),  # 50 / 80 / 90 / 100
+    _ts("created_at"),
+    UniqueConstraint("org_id", "scope", "period_key", "threshold", name="uq_chat_usage_alerts_once"),
 )

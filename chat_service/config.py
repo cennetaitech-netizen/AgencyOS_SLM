@@ -74,6 +74,19 @@ class Settings(BaseSettings):
     payment_webhook_secret: str = Field(default="dev-webhook-secret", repr=False)
     app_base_url: str = "http://localhost:3000"
 
+    # Subscriptions & invoicing (Phase 10)
+    invoice_require_approval: bool = True  # first real invoice runs need finance approval
+    invoice_number_prefix: str = "AOS"
+    tax_rates: dict[str, float] = Field(default_factory=dict)  # country → %, set by finance, e.g. {"IN": 18}
+    dunning_grace_days: int = 7
+    alert_thresholds: tuple[int, ...] = (50, 80, 90, 100)
+
+    # Chat actions (Phase 9)
+    action_expiry_minutes: int = 10
+    undo_window_hours: int = 24
+    approver_role: str = "org_admin"
+    prompt_version_actions: str = "system_v2"
+
     # Roles (names as the product issues them; confirm in Phase 0)
     org_admin_role: str = "org_admin"
     staff_role: str = "agencyos_staff"
