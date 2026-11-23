@@ -147,6 +147,6 @@ Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply
 1. Optional: an online payment provider (D9). Launch runs on manual billing; Stripe or Razorpay can be added later behind the same interface.
 2. Pen-test vendor booked; findings fixed.
 3. On-call rotation, alert routing, status page. Point the dashboard at the production Prometheus.
-4. Staging environment with the real product API and model host; load test and `ops/smoke_stack.py` re-run there (the container build is verified in CI).
+4. Staging environment with the real product API and model host. Run `ops/check_product_api.py` against the product until it passes (`docs/contracts/PRODUCT_API.md`), then re-run the load test and `ops/smoke_stack.py` there. The container build is verified in CI.
 5. One full real billing cycle with pilot orgs, reconciled.
 6. Go/no-go meeting (all owners in the RACI).

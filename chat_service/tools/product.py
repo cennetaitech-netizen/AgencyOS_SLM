@@ -1,9 +1,9 @@
 """Read tools over the existing AgencyOS product API.
 
-⚠️  PLACEHOLDER MAPPING. The endpoint paths below are *assumptions* until Phase 0 discovery maps each tool
-to a real product operation (docs/IMPLEMENTATION_GUIDE.md Phase 0, rule 2: never invent endpoints).
-The tool *names, descriptions and schemas* are the contract the model and evals use. Only
-``ENDPOINTS`` and the response mapping should change when the real API is connected.
+The product API contract is docs/contracts/product_api.openapi.yaml (rules in PRODUCT_API.md). The paths below
+follow it; if the real product's paths differ, change ``ENDPOINTS`` (a test checks the map against the contract),
+and check the product with ``ops/check_product_api.py``. The tool *names, descriptions and schemas* are what the
+model and evals use; the response shapes are what the contract fixes.
 
 Every call uses the requesting user's own credential, so the product enforces permissions.
 """

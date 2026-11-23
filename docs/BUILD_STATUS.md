@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-23 · Backend tests: **180 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
+Last updated: 2026-11-23 · Backend tests: **186 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -8,6 +8,7 @@ Last updated: 2026-11-23 · Backend tests: **180 passing** (Postgres 16 + Redis)
 | Shared contracts | G1 | Schema for all tables, 3 migrations, interfaces (`docs/contracts/CONTRACTS.md`) | migration up/down + `alembic check` |
 | Wallet & metering | 1 | Free trial, atomic reserve/settle/release, shadow mode, overage, expiry, packs, refunds, goodwill, invariant check | 22 |
 | Model client & bake-off | 2 | OpenAI-compatible streaming, fallback host; G2 bake-off with overhead ratio | 7 |
+| **Product API contract** | 0 | OpenAPI contract + rules for the product team, reference server, conformance checker (49 checks); HTTP adapter and product sign-in tested end to end, including a chat message whose tool call goes over HTTP with the user's own token | 6 |
 | Tools | 3 | Registry, `media_math`, `validate_ad_copy`, 6 product read tools (placeholder endpoints) + mock product | 20 |
 | Chat engine | 4 | Gates, context block, agent loop, refusals, disconnect settlement, numeric grounding flags, structured logs, analytics, per-org model routing | 20 |
 | **Chat window** | **5** | React widget: streaming chat, conversations, confirmation cards with Undo, token counts, balance, banners, blocked states, feedback, safe markdown, disclaimer, dark mode, phone layout; billing page; **admin settings** (second-approver queue, chat action rules, usage limits, plan and overage limit, billing details, training consent); demo app. Checked in a real browser against the running service | 19 (Vitest) + browser screenshots |
@@ -24,7 +25,7 @@ Last updated: 2026-11-23 · Backend tests: **180 passing** (Postgres 16 + Redis)
 ## Blocked on inputs
 | Needed | Unblocks |
 |---|---|
-| **Product repo or API spec** + auth details | Real read/write endpoints (`tools/product.py`), `ProductAuthProvider`, full write inventory |
+| **Product API** implemented to [`PRODUCT_API.md`](contracts/PRODUCT_API.md), or the product's own spec to map | Real campaign data and changes. The adapter, sign-in and checker are ready and tested; switching over is configuration (`PRODUCT_API.md` §3) |
 | **Product-owner approval** of actions, risk tiers, thresholds | Turning on chat actions for beta orgs |
 | **Model host key**: host chosen, **Together AI with Qwen2.5-7B-Instruct** (2026-11-23); add the key as GitHub secrets, see [ops/MODEL_HOST.md](../ops/MODEL_HOST.md#chosen-host-together-ai) | Eval gate in CI (`eval.yml`, now also runs on push and on demand), G2 bake-off, billing tokenizer pin |
 | **GPU + teacher model** (base model chosen: Qwen2.5-7B-Instruct) | Real SFT/DPO training runs (Phase 11) |

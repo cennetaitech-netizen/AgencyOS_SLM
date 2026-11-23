@@ -11,8 +11,8 @@ These are the interfaces every workstream builds against (COMBINED_RELEASE_PLAN.
 | 4b | **Subscriptions, invoices, caps** | `chat_service/billing/subscriptions.py`, `invoices.py`, `caps.py` | ✅ v1 |
 | 4c | **Chat actions** | `chat_service/actions/specs.py` (`ActionSpec`), `actions/service.py` (`ActionService`) | ✅ v1: 4 launch actions, pending product-owner approval of the write inventory |
 | 5 | **Model client** (OpenAI-compatible) | `chat_service/llm/client.py` (`ModelClient` protocol, `FallbackModelClient`) | ✅ Draft v1 |
-| 6 | **Product API adapter** | `chat_service/tools/product.py` (`ProductAPI` protocol, `ENDPOINTS` map) | ⚠️ **Placeholder paths**: replace in Phase 0 |
-| 7 | **Auth** | `chat_service/api/auth.py` (`AuthProvider` protocol) | ⚠️ `ProductAuthProvider` `/me` path and fields are placeholders: confirm in Phase 0 |
+| 6 | **Product API adapter** | `chat_service/tools/product.py` (`ProductAPI` protocol, `ENDPOINTS` map); contract [`product_api.openapi.yaml`](product_api.openapi.yaml) and [`PRODUCT_API.md`](PRODUCT_API.md); reference server `tools/mock_product_server.py`; checker `ops/check_product_api.py` | ✅ Contract defined and tested end to end against the reference server. ⚠️ The real product must implement it, or send its own spec to map |
+| 7 | **Auth** | `chat_service/api/auth.py` (`AuthProvider` protocol) | ✅ `/me` contract defined (`PRODUCT_API.md` §2) and tested against the reference server. ⚠️ Confirm with the product team |
 | 8 | **Payment provider** | `chat_service/billing/payments.py` (`PaymentProvider` protocol) | ⚠️ Dev provider only: add Stripe/Razorpay adapter after decision D9 |
 
 ## SSE event contract (v2)
