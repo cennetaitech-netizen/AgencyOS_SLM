@@ -19,6 +19,10 @@ class ConsentBody(BaseModel):
     consent: bool
 
 
+class ModelBody(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+
+
 class CanaryBody(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     percent: int = Field(ge=1, le=100)
@@ -121,7 +125,14 @@ def register_ops_routes(app: FastAPI, services, principal, require_role, audited
     async def rollout_state(p: Principal = Depends(staff), svc=Depends(services)):
         st = await svc.rollout.state()
         models = sorted(svc.model.clients) if isinstance(svc.model, ModelRouter) else [svc.model.name]
-        return st.__dict__ | {"available_models": models}
+        # What organisations without a pin get now: production, or the configured default if production's
+        # model is no longer configured.
+        serving = st.production_model if st.production_model in models else svc.rollout.default_model
+        return st.__dict__ | {"available_models": models, "default_model": serving}
+
+    @app.post("/chat/admin/model-rollout/production", dependencies=[audited("model_set", "global")])
+    async def set_production(body: ModelBody, p: Principal = Depends(staff), svc=Depends(services)):
+        return await _rollout(_router(svc).store.set_production, body.model)
 
     @app.post("/chat/admin/model-rollout/canary", dependencies=[audited("model_canary_started", "global")])
     async def start_canary(body: CanaryBody, p: Principal = Depends(staff), svc=Depends(services)):

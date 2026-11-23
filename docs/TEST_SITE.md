@@ -14,19 +14,47 @@ Testers sign in with a personal **invite link**. Staff create links in the site'
 ## On your own computer (Mac, Windows or Linux), no hosting account
 Good for trying it yourself, and for a few testers while your computer is on.
 
-1. Install and start **Docker Desktop** (docker.com).
-2. Get the code (or `git pull` if you already have it):
+### What gets installed
+| App | Why |
+|---|---|
+| Xcode Command Line Tools (Mac) | `git` and `python3` |
+| Homebrew (Mac) | Installs the apps below |
+| Docker Desktop | Runs the site's own database (Postgres), Redis, the API and background jobs |
+| cloudflared | Only for a public address for testers elsewhere |
+| Ollama + one local model | Optional: free answers on your computer, no API key |
+
+Postgres, Redis, Node and the Python packages run inside Docker, so they aren't installed on the computer. Gemini and Together need no install, only an API key.
+
+### Steps
+1. **Mac: install everything once.** In Terminal:
+```bash
+xcode-select --install
+```
+When that has finished, get the code (or `git pull` if you already have it):
 ```bash
 git clone -b claude/vibrant-cori-f7j44r https://github.com/cennetaitech-netizen/AgencyOS_SLM.git
 ```
-3. Start it:
+Then:
 ```bash
-cd AgencyOS_SLM && ops/test-site.sh
+cd AgencyOS_SLM && ops/mac-setup.sh
+```
+It installs Homebrew, Docker Desktop, cloudflared and Ollama with one local model (`qwen2.5:7b` with 16 GB of memory or more, else `qwen2.5:3b`), skipping what's already there. Add `--no-ollama` to skip Ollama. On Windows or Linux, install Docker Desktop (docker.com) and git yourself.
+2. **Start it:**
+```bash
+ops/test-site.sh
 ```
 The first run builds everything, which takes a few minutes. Then it opens your **staff link** in the browser and prints it. The link is kept, so you stay the same user after restarts.
 
-4. **Real answers:** open `.env.testsite` in the AgencyOS_SLM folder, remove the `#` from the three `CHAT_MODEL_` lines, and put your Together key after `CHAT_MODEL_API_KEY=`. Then run `ops/test-site.sh` again. Until you do, every answer is the same canned sentence. The key stays on your computer.
-5. **Testers elsewhere:** install cloudflared (`brew install cloudflared` on a Mac), then run:
+3. **Models (real answers):** open `.env.testsite` in the AgencyOS_SLM folder. You can switch on several models at once:
+   - **Google Gemini:** put your key (from aistudio.google.com/apikey) after `CHAT_GEMINI_API_KEY=`. The model is `gemini-3.5-flash-lite` unless you set `CHAT_GEMINI_MODEL`.
+   - **Ollama:** if Ollama was running when the file was created, its models are already filled in. Otherwise remove the `#` from the two `CHAT_OLLAMA_` lines and list your models (`ollama list`), comma-separated.
+   - **Together AI:** remove the `#` from the three `CHAT_MODEL_` lines and put your Together key after `CHAT_MODEL_API_KEY=`.
+   - **Any other OpenAI-compatible host:** `CHAT_MODELS` (an example is in the file).
+
+   Then run `ops/test-site.sh` again. It prints which model answers by default: Gemini if its key is set, then Ollama, then Together. Until you add one, every answer is the same canned sentence. Keys stay on your computer.
+
+   Staff choose the default model in the **Models** tab. To give one organisation its own model, pick it when you create its tester link (**Testers** tab).
+4. **Testers elsewhere:** cloudflared is installed by `ops/mac-setup.sh` (or `brew install cloudflared`). Run:
 ```bash
 ops/test-site.sh --public
 ```
@@ -34,9 +62,13 @@ It prints a public `https://….trycloudflare.com` staff link. Open it, and crea
    - The address changes each time the tunnel restarts, so links you've sent stop working. Send new ones.
    - It only works while your computer is awake and online. On a Mac, `caffeinate -dims` in another terminal keeps it awake.
    - For a fixed address, use Render (below).
-6. **Stop:** `ops/test-site.sh --stop` keeps the data. `ops/test-site.sh --reset` deletes it.
+5. **Stop:** `ops/test-site.sh --stop` keeps the data. `ops/test-site.sh --reset` deletes it.
 
 Testers on the same Wi-Fi can also use `http://<your computer's IP address>:8090`, without a tunnel.
+
+### What the assistant answers
+- **Media questions** (campaigns, planning and buying, performance, budgets and pacing, audiences, creatives and ad copy, reporting, AgencyOS how-to): answered, with figures only from the campaign data (sample data on the test site).
+- **Anything else** (for example "Who is the Prime Minister of …?"): no answer. It says it only helps with media campaigns and AgencyOS, and adds links to search the question on Google, Bing, DuckDuckGo and Wikipedia. These replies aren't charged. Set `CHAT_SEARCH_LINKS_ON_REFUSAL=false` to leave the links out.
 
 ## 1. Deploy on Render (once, about 15 minutes)
 You need a Render account (render.com) connected to the GitHub account that owns this repository, and your Together API key.
