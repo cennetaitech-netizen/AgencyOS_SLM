@@ -1,6 +1,6 @@
 # Model host: prefix caching
 
-Every model call resends the same opening: the system prompt and the tool schemas (about 1,300 tokens read-only, 1,650 with chat actions), then the conversation so far. Billable text is only the user's message and the visible answer, about 70–100 tokens. Without caching, the host computes the whole prompt every time, about 25× the billable tokens.
+Every model call resends the same opening: the system prompt and the tool schemas (about 1,340 tokens read-only, 1,710 with chat actions), then the conversation so far. Billable text is only the user's message and the visible answer, about 70–100 tokens. Without caching, the host computes the whole prompt every time, about 25× the billable tokens.
 
 **Prefix caching** lets the host reuse the work for any opening it has seen recently. The chat service lays prompts out for it (`chat_service/engine/prompting.py`):
 
@@ -10,6 +10,8 @@ Every model call resends the same opening: the system prompt and the tool schema
 4. **Latest user message:** starts with a `[Context]` line (date, timezone, currency, role). It isn't billed and isn't stored in history.
 
 `tests/test_prompt_cache.py` fails if anything personal or dated moves back into parts 1–3, or if the prefix grows past its budget.
+
+In step 4 the context goes in its own short system message by default. If your model's chat template accepts only one system message, set `CHAT_PROMPT_CONTEXT_PLACEMENT=user_prefix` to put it on the first line of the user's message instead. A small model did worse that way ([docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)), so re-run the eval if you switch.
 
 ## Turn it on
 
@@ -36,6 +38,8 @@ Use the managed host's cached-input price. On your own GPUs, cached tokens skip 
 - Alert `AosPromptCacheHitLow` (below 50% for an hour) points to one of three causes: caching off, a prompt change that broke the shared prefix, or traffic not reaching warm replicas.
 
 ## What to expect
+Measured with the first v3 draft. The shipped prompt is about 50 tokens longer, which changes these figures only slightly.
+
 Two estimates, both from this environment with the stand-in host (`ops/fake_model_host.py` models vLLM's block cache):
 
 **Simulation:** `ops/prompt_cache_sim.py`, a 9-hour day of 2,000 users in 300 orgs, about 14,900 messages, 60% calling a data tool, cache sizes from 100k to 1M tokens.

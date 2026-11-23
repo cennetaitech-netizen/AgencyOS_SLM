@@ -346,7 +346,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             group="reporting",
             description=(
                 "Spend, impressions, clicks, conversions, revenue, CTR, CPC, CPM, CPA, ROAS for a campaign "
-                "or a client's campaigns over a date range."
+                "or a client's campaigns over a date range, optionally broken down by platform, day or campaign."
             ),
             parameters={
                 "type": "object",

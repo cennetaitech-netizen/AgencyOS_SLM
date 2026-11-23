@@ -67,7 +67,7 @@ async def test_arguments_are_still_validated_against_the_full_schema():
 
 def test_prefix_size_budget():
     """Characters are a stable proxy for tokens here. Measured with a Qwen tokenizer on 2026-11-23: read-only prefix
-    1,282 tokens (was 1,634), with actions 1,649 (was 2,156). Raise these only on purpose."""
+    1,336 tokens (was 1,634), with actions 1,712 (was 2,156). Raise these only on purpose."""
     s = Settings()
     registry = build_registry(s, MockProductAPI())
     read_only = len(load_prompt(s.prompt_version)) + len(json.dumps(registry.schemas(False)))

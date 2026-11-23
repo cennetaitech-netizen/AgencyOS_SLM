@@ -1,0 +1,1 @@
+[{"label": "Qwen2.5-1.5B-Instruct (CPU, local)", "base_url": "http://127.0.0.1:8010/v1", "model": "Qwen/Qwen2.5-1.5B-Instruct", "api_key_env": ""}]

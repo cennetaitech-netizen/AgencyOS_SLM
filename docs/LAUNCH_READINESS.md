@@ -72,11 +72,12 @@ Setup:
 - **Fix:**
   1. **Prefix caching** on the model host (vLLM `--enable-prefix-caching --enable-prompt-tokens-details`, or a managed host's prompt caching).
   2. **Cache-friendly prompt** (`system_v3`): a static system prompt and tool schemas, with the context moved to a `[Context]` line on the latest message.
-  3. **Shorter prefix**, measured with a Qwen tokenizer: read-only 1,634 → **1,282 tokens** (−22%), with actions 2,156 → **1,649** (−24%). Tool schemas no longer carry validation-only keywords, which the server still enforces.
+  3. **Shorter prefix**, measured with a Qwen tokenizer: read-only 1,634 → **1,336 tokens** (−18%), with actions 2,156 → **1,712** (−21%). The cache figures below were measured with the first v3 draft, about 50 tokens shorter. Tool schemas no longer carry validation-only keywords, which the server still enforces.
   4. **Cached tokens tracked**: stored per message (migration 0005), exported as `aos_chat_host_cached_prompt_tokens_total`, priced separately (`CHAT_HOST_PRICE_CACHED_INPUT_PER_1M_MINOR`).
   5. **Margin alert** now follows the **uncached** ratio, plus a new `AosPromptCacheHitLow` alert. The dashboard shows the cache hit rate.
 - **Result:** uncached host tokens per billable token went from about **26× to about 3×**. Simulation of a 2,000-user day: 2.8–3.0×, cache hit about 91%. Load test: 2.3×, hit 94%. With caching but the old layout it would have been 7–8×.
-- **Still to do:** re-measure with the real model host and tokenizer in staging. The 20× alert stays as the safety line on the uncached ratio.
+- **Real-model check of the new prompt:** a small open model on CPU scored the shipped v3 at 62% on the 32-case eval, against 53–56% for the old prompt, with data questions weaker (43% vs 64%). Details and caveats: [docs/chat/PROMPT_V3_LOCAL_EVAL.md](chat/PROMPT_V3_LOCAL_EVAL.md).
+- **Still to do:** re-measure with the real model host and tokenizer in staging, and run the eval gate against the production model (watch data questions). The 20× alert stays as the safety line on the uncached ratio.
 
 ## 3. Load test and failure drill (2026-11-22, this environment)
 
