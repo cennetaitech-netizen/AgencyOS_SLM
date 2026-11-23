@@ -10,7 +10,8 @@ runner, with no GPU and no model host. Not for production traffic.
 - Like a production host's prefix cache, it keeps the attention cache of the previous prompt and reuses the longest
   shared opening, so the reported cached tokens are real and use the model's real tokenizer.
 - Loads weights only (safetensors); never runs code from the model repository.
-- One request at a time (a lock), which is enough for the evals.
+- One request at a time (a lock), which is enough for the evals. While generating, it sends SSE keep-alive comments
+  every 10 seconds so slow CPUs don't trip the client's read timeout.
 """
 
 from __future__ import annotations
@@ -145,10 +146,24 @@ def handler_for(model: Model, name: str):
                 return
             req = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
             started = time.monotonic()
-            res = model.complete(req["messages"], req.get("tools"), int(req.get("max_tokens") or 512))
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.end_headers()
+            # Generate in a thread and send SSE keep-alive comments meanwhile, so a slow CPU doesn't trip the
+            # client's read timeout (a real host streams tokens as it goes).
+            result: dict = {}
+            worker = threading.Thread(
+                target=lambda: result.update(
+                    res=model.complete(req["messages"], req.get("tools"), int(req.get("max_tokens") or 512))
+                )
+            )
+            worker.start()
+            while worker.is_alive():
+                worker.join(timeout=10)
+                if worker.is_alive():
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+            res = result["res"]
 
             def send(payload: dict) -> None:
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
