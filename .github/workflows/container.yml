@@ -50,31 +50,21 @@ jobs:
       - name: Jobs container is running
         run: test "$(docker compose ps --status running --services | grep -c '^jobs$')" = "1"
 
-      - name: Test site mode (invite links, pages served by the API), as deployed on Render
+      - name: Test site on a laptop (ops/test-site.sh), checked end to end
         run: |
-          net=$(docker inspect "$(docker compose ps -q api)" -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
-          docker run -d --name site --network "$net" -p 8091:8090 \
-            -e CHAT_ENV=staging -e CHAT_AUTH_PROVIDER=invite -e CHAT_WEB_DIR=/app/web \
-            -e CHAT_INVITE_SECRET=ci-only-invite-secret-0123456789abcdef \
-            -e CHAT_DATA_ENCRYPTION_KEYS="$(openssl rand -base64 32)" \
-            -e CHAT_DATABASE_URL=postgres://chat:chat@postgres:5432/chat -e CHAT_REDIS_URL=redis://redis:6379/0 \
-            -e CHAT_MODEL_BASE_URL=http://model:8003/v1 -e CHAT_PRODUCT_ADAPTER=mock -e CHAT_PAYMENT_PROVIDER=manual \
-            agencyos-assistant:ci
-          for i in $(seq 1 30); do curl -sf localhost:8091/readyz > /dev/null && break; sleep 2; done
-          link=$(docker exec site python -m chat_service.invites create --name CI --org "AgencyOS CI" --role staff \
-            --base-url http://localhost:8091 | tail -1)
+          link=$(ops/test-site.sh --no-browser | tail -1)
           python3 ops/check_test_site.py --link "$link"
+          # a restart keeps the same staff link
+          test "$(ops/test-site.sh --no-browser | tail -1)" = "$link"
 
       - name: Logs on failure
         if: failure()
         run: |
           docker compose --profile monitoring logs --no-color --tail 200
-          docker logs site --tail 100 || true
 
       - name: Stop the stack
         if: always()
         run: |
-          docker rm -f site || true
           docker compose --profile monitoring down -v
 
   image-scan:

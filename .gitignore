@@ -14,3 +14,5 @@ widget/node_modules/
 widget/dist/
 dump.rdb
 widget/dist-pilot/
+.env.testsite
+.testsite-tunnel.*

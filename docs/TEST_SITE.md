@@ -11,7 +11,34 @@ Testers sign in with a personal **invite link**. Staff create links in the site'
 - Render: web $7, jobs worker $7, Postgres $6, Redis free.
 - Together usage is capped at 5M model tokens a day across all testers (`CHAT_GLOBAL_DAILY_HOST_TOKEN_CEILING`), roughly $1.50 a day at most.
 
-## 1. Deploy (once, about 15 minutes)
+## On your own computer (Mac, Windows or Linux), no hosting account
+Good for trying it yourself, and for a few testers while your computer is on.
+
+1. Install and start **Docker Desktop** (docker.com).
+2. Get the code (or `git pull` if you already have it):
+```bash
+git clone -b claude/vibrant-cori-f7j44r https://github.com/cennetaitech-netizen/AgencyOS_SLM.git
+```
+3. Start it:
+```bash
+cd AgencyOS_SLM && ops/test-site.sh
+```
+The first run builds everything, which takes a few minutes. Then it opens your **staff link** in the browser and prints it. The link is kept, so you stay the same user after restarts.
+
+4. **Real answers:** open `.env.testsite` in the AgencyOS_SLM folder, remove the `#` from the three `CHAT_MODEL_` lines, and put your Together key after `CHAT_MODEL_API_KEY=`. Then run `ops/test-site.sh` again. Until you do, every answer is the same canned sentence. The key stays on your computer.
+5. **Testers elsewhere:** install cloudflared (`brew install cloudflared` on a Mac), then run:
+```bash
+ops/test-site.sh --public
+```
+It prints a public `https://….trycloudflare.com` staff link. Open it, and create tester links in the **Testers** tab there, so the links use the public address.
+   - The address changes each time the tunnel restarts, so links you've sent stop working. Send new ones.
+   - It only works while your computer is awake and online. On a Mac, `caffeinate -dims` in another terminal keeps it awake.
+   - For a fixed address, use Render (below).
+6. **Stop:** `ops/test-site.sh --stop` keeps the data. `ops/test-site.sh --reset` deletes it.
+
+Testers on the same Wi-Fi can also use `http://<your computer's IP address>:8090`, without a tunnel.
+
+## 1. Deploy on Render (once, about 15 minutes)
 You need a Render account (render.com) connected to the GitHub account that owns this repository, and your Together API key.
 
 1. In Render, click **New → Blueprint**.

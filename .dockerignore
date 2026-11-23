@@ -11,3 +11,5 @@ ml/data
 .env
 dump.rdb
 widget/dist-pilot
+.env.testsite
+.testsite-tunnel.*

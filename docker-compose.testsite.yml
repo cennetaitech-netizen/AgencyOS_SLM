@@ -1,0 +1,17 @@
+# Test-site mode for the local stack: invite-link sign-in, the site's pages, optionally the real model.
+# Started by ops/test-site.sh, which creates .env.testsite with the secrets these settings read.
+services:
+  api:
+    environment: &site
+      CHAT_ENV: staging
+      CHAT_AUTH_PROVIDER: invite
+      CHAT_WEB_DIR: /app/web
+      CHAT_INVITE_SECRET: ${CHAT_INVITE_SECRET:?start the test site with ops/test-site.sh}
+      CHAT_DATA_ENCRYPTION_KEYS: ${CHAT_DATA_ENCRYPTION_KEYS:?start the test site with ops/test-site.sh}
+      CHAT_MODEL_BASE_URL: ${CHAT_MODEL_BASE_URL:-http://model:8003/v1}
+      CHAT_MODEL_NAME: ${CHAT_MODEL_NAME:-media-slm-dev}
+      CHAT_MODEL_API_KEY: ${CHAT_MODEL_API_KEY:-}
+      CHAT_PAYMENT_PROVIDER: manual
+      CHAT_GLOBAL_DAILY_HOST_TOKEN_CEILING: "5000000"
+  jobs:
+    environment: *site
