@@ -1,0 +1,30 @@
+# Chart values for the CI install on kind (.github/workflows/helm.yml): the image built in CI, stand-in services
+# from stand-ins.yaml, and dev sign-in so ops/smoke_stack.py can send a chat message. Not for real deployments.
+image:
+  repository: agencyos-assistant
+  tag: ci
+  pullPolicy: Never
+environment: staging
+config:
+  CHAT_AUTH_PROVIDER: dev
+  CHAT_PRODUCT_ADAPTER: mock
+  CHAT_PAYMENT_PROVIDER: manual
+  CHAT_MODEL_BASE_URL: http://model:8003/v1
+secrets:
+  create: true
+  values:
+    CHAT_DATABASE_URL: postgresql+asyncpg://chat:chat@postgres:5432/chat
+    CHAT_REDIS_URL: redis://redis:6379/0
+    CHAT_METRICS_TOKEN: dev-metrics-token
+api:
+  workers: 2
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 3}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+jobs:
+  intervalSeconds: 60
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+networkPolicy:
+  enabled: true

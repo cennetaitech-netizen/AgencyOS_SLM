@@ -1,0 +1,47 @@
+{{- if .Values.migrations.enabled }}
+# Runs before the new pods on every install and upgrade. If it fails, the release fails and the running version stays.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aos.fullname" . }}-migrate
+  labels:
+    {{- include "aos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # kept on failure, so `kubectl logs job/...-migrate` shows why
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "aos.selector" (dict "ctx" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "aos.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["alembic", "upgrade", "head"]
+          env:
+            {{- include "aos.env" . | nindent 12 }}
+          {{- include "aos.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            {{- include "aos.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "aos.volumes" . | nindent 8 }}
+{{- end }}

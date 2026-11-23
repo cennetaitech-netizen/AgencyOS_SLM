@@ -1,0 +1,116 @@
+name: helm
+
+# Lints and validates the Helm chart, then installs it on a throwaway kind cluster with stand-in Postgres, Redis and
+# model host, runs `helm test` and the end-to-end smoke test, upgrades the release (migrations run again) and checks
+# the pods' security settings.
+
+on:
+  push:
+    paths: ["deploy/**", "Dockerfile", "chat_service/**", "migrations/**", "ops/smoke_stack.py",
+            "ops/fake_model_host.py", "ops/prefix_cache.py", "ops/prometheus/alerts.yml", ".github/workflows/helm.yml"]
+  pull_request:
+    paths: ["deploy/**", "Dockerfile", "chat_service/**", "migrations/**", "ops/smoke_stack.py",
+            "ops/fake_model_host.py", "ops/prefix_cache.py", "ops/prometheus/alerts.yml", ".github/workflows/helm.yml"]
+  workflow_dispatch:
+
+env:
+  CHART: deploy/helm/agencyos-assistant
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: {version: v3.16.3}
+
+      - name: Lint (defaults with a secret, CI values, production example)
+        run: |
+          helm lint "$CHART" --strict --set secrets.existingSecret=s
+          helm lint "$CHART" --strict -f deploy/kind/values-ci.yaml
+          helm lint "$CHART" --strict -f deploy/helm/examples/values-production.yaml
+
+      - name: Production without secrets is refused
+        run: |
+          if helm template aos "$CHART" > /dev/null 2> err.txt; then echo "expected a failure"; exit 1; fi
+          grep -q "needs secrets.existingSecret" err.txt
+
+      - name: Validate rendered manifests against the Kubernetes and CRD schemas
+        run: |
+          helm template aos "$CHART" -f deploy/helm/examples/values-production.yaml > prod.yaml
+          helm template aos "$CHART" -f deploy/kind/values-ci.yaml > ci.yaml
+          docker run --rm -v "$PWD:/w" -w /w ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary \
+            -kubernetes-version 1.29.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            prod.yaml ci.yaml
+
+  install:
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: {version: v3.16.3}
+      - uses: helm/kind-action@v1
+        with: {cluster_name: aos}
+
+      - name: Build the image and load it into the cluster
+        run: |
+          docker build -t agencyos-assistant:ci .
+          kind load docker-image agencyos-assistant:ci --name aos
+
+      - name: Start stand-in Postgres, Redis and model host
+        run: |
+          kubectl create configmap fake-model-host --from-file=ops/fake_model_host.py --from-file=ops/prefix_cache.py
+          kubectl apply -f deploy/kind/stand-ins.yaml
+          kubectl wait --for=condition=available deploy/postgres deploy/redis deploy/model --timeout=240s
+
+      - name: Install (migrations run first, then the API and jobs)
+        run: helm install aos "$CHART" -f deploy/kind/values-ci.yaml --wait --timeout 6m
+
+      - name: helm test
+        run: helm test aos --logs --timeout 2m
+
+      - name: Smoke test through the Service (chat stream, metrics)
+        run: |
+          kubectl port-forward svc/aos-agencyos-assistant 8090:80 > pf.log 2>&1 &
+          python3 ops/smoke_stack.py --api http://localhost:8090 --metrics-token dev-metrics-token --timeout 120
+
+      - name: Pods run as non-root with a read-only root filesystem
+        run: |
+          for c in api jobs; do
+            pod=$(kubectl get pod -l app.kubernetes.io/component=$c -o jsonpath='{.items[0].metadata.name}')
+            test "$(kubectl exec "$pod" -- id -u)" = "10001"
+            # /home/app belongs to the app user, so this can only fail because the filesystem is read-only
+            if kubectl exec "$pod" -- touch /home/app/x 2>/dev/null; then echo "$c: root filesystem is writable"; exit 1; fi
+          done
+          test "$(kubectl get deploy aos-agencyos-assistant-jobs -o jsonpath='{.spec.replicas}')" = "1"
+
+      - name: Upgrade (migrations run again, pods roll without downtime)
+        run: |
+          helm upgrade aos "$CHART" -f deploy/kind/values-ci.yaml --set jobs.intervalSeconds=120 --wait --timeout 6m
+          test "$(helm history aos -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)[-1]["status"])')" = "deployed"
+          helm test aos --logs --timeout 2m
+
+      - name: No container restarts
+        run: |
+          kubectl get pods -l app.kubernetes.io/instance=aos
+          restarts=$(kubectl get pods -l app.kubernetes.io/instance=aos \
+            -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}' \
+            | awk '{s+=$1} END {print s+0}')
+          test "$restarts" = "0"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get all,jobs,events -o wide || true
+          kubectl describe pods -l app.kubernetes.io/instance=aos || true
+          kubectl logs -l app.kubernetes.io/instance=aos --all-containers --tail 200 --prefix || true
+          kubectl logs job/aos-agencyos-assistant-migrate --tail 200 || true
+          cat pf.log || true
+
+      - name: Uninstall
+        if: always()
+        run: helm uninstall aos --wait || true

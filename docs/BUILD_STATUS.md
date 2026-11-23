@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-23 · Backend tests: **187 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
+Last updated: 2026-11-23 · Backend tests: **193 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test, Helm install on kind
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -21,6 +21,7 @@ Last updated: 2026-11-23 · Backend tests: **187 passing** (Postgres 16 + Redis)
 | **Launch hardening** | **12** | Production start-up guard, security headers/CORS/size limit, audit log, encryption at rest with key rotation, Redis-shared limits, metrics + readiness + 9 SLO alerts, cross-tenant security suite, load test at 3× and failure drill (money checks pass), Dockerfile + compose, runbooks. See [LAUNCH_READINESS.md](LAUNCH_READINESS.md) | 16 + load/drill runs |
 | **Prefix caching & prompt v3** | **12** | Cache-friendly prompt layout (static `system_v3` prompts and tool schemas, `[Context]` line on the latest message) shared by engine, evals and training export; prefix 17–20% shorter; checked on real small models (3B: 75% vs 72–78% for the old prompt; 1.5B: 62% vs 53–56%; see docs/chat/PROMPT_V3_LOCAL_EVAL.md); cached tokens tracked, priced and alerted on; host setup in `ops/MODEL_HOST.md`. Uncached overhead about 26× → about 3× (simulated and load-tested) | 9 + A/B, simulation and live run |
 | **Monitoring** | **12** | Grafana dashboard (21 panels in 5 sections: SLO headline, traffic and latency, tokens and margin, tools and actions, resilience, firing alerts), Prometheus config, provisioning, compose `monitoring` profile, query checker. Every query verified against live data | 4 (metric/label drift, generator, action outcome counts) + live run |
+| **Kubernetes** | **12** | Helm chart (`deploy/helm`): API with autoscaling, disruption budget and graceful shutdown for open streams; single jobs pod; migrations before every install and upgrade; non-root, read-only pods; streaming-safe ingress; optional ServiceMonitor, alert rules and NetworkPolicy. CI installs it on kind, runs `helm test` and the chat smoke test, upgrades, and checks for restarts | 6 + kind install in CI |
 
 ## Blocked on inputs
 | Needed | Unblocks |
@@ -35,4 +36,4 @@ Last updated: 2026-11-23 · Backend tests: **187 passing** (Postgres 16 + Redis)
 | The product's design system | Restyling the widget via `--aos-*` variables; embedding it in the product shell |
 
 ## Remaining engineering (no external input needed)
-None. The container image and the full compose stack (with monitoring) are built and smoke-tested in CI (`container.yml`). Everything left needs one of the inputs above.
+None. The container image and the full compose stack (with monitoring) are built and smoke-tested in CI (`container.yml`), and the Helm chart is installed and upgraded on a kind cluster in CI (`helm.yml`). Everything left needs one of the inputs above.

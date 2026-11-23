@@ -1,0 +1,82 @@
+# CI only: throwaway Postgres, Redis and the stand-in model host for installing the chart on a kind cluster.
+# Production uses managed Postgres and Redis and a real model host (ops/MODEL_HOST.md).
+# The model host's code comes from a ConfigMap created by the workflow from ops/fake_model_host.py and ops/prefix_cache.py.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: postgres}
+spec:
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - {name: POSTGRES_USER, value: chat}
+            - {name: POSTGRES_PASSWORD, value: chat}
+            - {name: POSTGRES_DB, value: chat}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "chat"]}
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres}
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis}
+spec:
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports: [{containerPort: 6379}]
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis}
+spec:
+  selector: {app: redis}
+  ports: [{port: 6379}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: model}
+spec:
+  selector: {matchLabels: {app: model}}
+  template:
+    metadata: {labels: {app: model}}
+    spec:
+      containers:
+        - name: model
+          image: agencyos-assistant:ci
+          imagePullPolicy: Never
+          args: ["python", "/ops/fake_model_host.py", "--host", "0.0.0.0", "--port", "8003"]
+          ports: [{containerPort: 8003}]
+          readinessProbe:
+            httpGet: {path: /stats, port: 8003}
+            periodSeconds: 3
+          volumeMounts: [{name: ops, mountPath: /ops, readOnly: true}]
+      volumes:
+        - name: ops
+          configMap: {name: fake-model-host}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: model}
+spec:
+  selector: {app: model}
+  ports: [{port: 8003}]

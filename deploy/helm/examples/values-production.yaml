@@ -1,0 +1,35 @@
+# Example production values. Copy, fill in your hosts and image registry, and keep secrets out of this file:
+# create the Secret "agencyos-assistant-secrets" from your secrets manager first (deploy/helm/README.md).
+image:
+  repository: registry.example.com/agencyos-assistant
+  tag: "0.1.0"
+environment: production
+config:
+  CHAT_AUTH_PROVIDER: product
+  CHAT_PRODUCT_ADAPTER: http
+  CHAT_PRODUCT_API_BASE_URL: https://api.agencyos.example
+  CHAT_PAYMENT_PROVIDER: manual
+  CHAT_MODEL_BASE_URL: https://api.together.xyz/v1
+  CHAT_MODEL_NAME: Qwen/Qwen2.5-7B-Instruct-Turbo
+  CHAT_CORS_ALLOWED_ORIGINS: '["https://app.agencyos.example"]'
+  CHAT_APP_BASE_URL: https://app.agencyos.example
+  CHAT_BILLING_TOKENIZER_PATH: /srv/tokenizer.json
+secrets:
+  existingSecret: agencyos-assistant-secrets
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: assistant.agencyos.example
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: assistant-agencyos-tls
+      hosts: [assistant.agencyos.example]
+metrics:
+  serviceMonitor: {enabled: true}
+  prometheusRule: {enabled: true}
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}

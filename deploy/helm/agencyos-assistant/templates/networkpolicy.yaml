@@ -1,0 +1,22 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress only: the pods need outbound access to Postgres, Redis, the model host and the product API, whose
+# addresses differ per deployment. Restrict egress in your cluster policy if needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aos.fullname" . }}
+  labels:
+    {{- include "aos.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "aos.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{port: 8090, protocol: TCP}]
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

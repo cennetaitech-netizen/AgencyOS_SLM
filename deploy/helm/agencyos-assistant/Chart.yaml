@@ -1,0 +1,7 @@
+apiVersion: v2
+name: agencyos-assistant
+description: AgencyOS Assistant chat service (API, maintenance jobs, database migrations)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"

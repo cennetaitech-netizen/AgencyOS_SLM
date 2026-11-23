@@ -1,0 +1,137 @@
+# AgencyOS Assistant: Helm values. Production example: deploy/helm/README.md. CI example: deploy/kind/values-ci.yaml.
+# Postgres, Redis and the model host are not part of this chart: point it at managed services.
+
+image:
+  repository: agencyos-assistant
+  tag: ""                 # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# CHAT_ENV. "production" refuses to start with unsafe settings (chat_service/config.py: production_problems).
+environment: production
+
+# Non-secret settings, passed as environment variables exactly as written (see .env.example for every setting).
+# Lists are JSON, e.g. CHAT_CORS_ALLOWED_ORIGINS: '["https://app.agencyos.example"]'.
+config:
+  CHAT_AUTH_PROVIDER: product
+  CHAT_PRODUCT_ADAPTER: http
+  CHAT_PAYMENT_PROVIDER: manual
+  # CHAT_MODEL_BASE_URL: https://api.together.xyz/v1
+  # CHAT_MODEL_NAME: Qwen/Qwen2.5-7B-Instruct-Turbo
+  # CHAT_PRODUCT_API_BASE_URL: https://api.agencyos.example
+  # CHAT_CORS_ALLOWED_ORIGINS: '["https://app.agencyos.example"]'
+  # CHAT_BILLING_TOKENIZER_PATH: /srv/tokenizer.json   (see "Billing tokenizer" in deploy/helm/README.md)
+
+# Secret settings: CHAT_DATABASE_URL, CHAT_REDIS_URL, CHAT_METRICS_TOKEN, CHAT_DATA_ENCRYPTION_KEYS,
+# CHAT_MODEL_API_KEY, CHAT_MODEL_FALLBACK_API_KEY, CHAT_PAYMENT_WEBHOOK_SECRET (only with an online payment provider).
+secrets:
+  # Recommended: a Secret you create from your secrets manager (External Secrets, Sealed Secrets, ...),
+  # with the keys above. It must exist before install: the migration job runs first and reads it.
+  existingSecret: ""
+  # Or let the chart create one from these values (development and CI). It's created as a pre-install hook so the
+  # migration job can read it, which also means `helm uninstall` leaves it behind: delete it by hand.
+  create: false
+  values: {}
+  # Key in the Secret holding the metrics token (used by the ServiceMonitor).
+  metricsTokenKey: CHAT_METRICS_TOKEN
+
+api:
+  replicas: 2
+  workers: 4              # uvicorn worker processes per pod
+  # Proxies whose X-Forwarded-* headers are trusted (client address and scheme in logs). "*" suits a cluster where
+  # only the ingress controller reaches the pods (see networkPolicy); otherwise list its addresses.
+  forwardedAllowIps: "*"
+  # Longer than the longest streamed reply, so a rollout or scale-down doesn't cut answers off.
+  terminationGracePeriodSeconds: 120
+  preStopSleepSeconds: 10 # keep serving while the load balancer removes the pod
+  resources:
+    requests: {cpu: 500m, memory: 768Mi}
+    limits: {memory: 1536Mi}
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []   # default: spread replicas across nodes when possible
+  podAnnotations: {}
+
+jobs:
+  enabled: true           # exactly one replica: billing cycles, dunning, retention, canary checks
+  intervalSeconds: 300
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+  nodeSelector: {}
+  tolerations: []
+  podAnnotations: {}
+
+migrations:
+  enabled: true           # `alembic upgrade head` before every install and upgrade
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  # Defaults for ingress-nginx: no buffering, so streamed tokens reach the browser as they're produced, and a read
+  # timeout above the longest reply. Other controllers need their own equivalents.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+  hosts:
+    - host: assistant.agencyos.example
+      paths: [{path: /, pathType: Prefix}]
+  tls: []
+  #  - secretName: assistant-tls
+  #    hosts: [assistant.agencyos.example]
+
+metrics:
+  serviceMonitor:
+    enabled: false        # needs the Prometheus Operator CRDs
+    interval: 30s
+    labels: {}
+  prometheusRule:
+    enabled: false        # the alert rules from ops/prometheus/alerts.yml
+    labels: {}
+
+networkPolicy:
+  enabled: false
+  # Who may reach the API. Empty = any pod in any namespace (the ingress controller, Prometheus).
+  ingressFrom: []
+  #  - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+# Extra volumes for every container (API, jobs, migrations), e.g. a read-only volume with the billing tokenizer.
+extraVolumes: []
+extraVolumeMounts: []

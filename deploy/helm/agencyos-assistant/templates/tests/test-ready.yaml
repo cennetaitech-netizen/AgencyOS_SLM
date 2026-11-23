@@ -1,0 +1,33 @@
+# `helm test <release>`: the API answers /readyz (database reachable) through its Service.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "aos.fullname" . }}-test-ready
+  labels:
+    {{- include "aos.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: ready
+      image: {{ include "aos.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      args:
+        - python
+        - -c
+        - |
+          import json, urllib.request
+          body = json.load(urllib.request.urlopen("http://{{ include "aos.fullname" . }}:{{ .Values.service.port }}/readyz", timeout=10))
+          print(body)
+          assert body["status"] == "ready", body
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - {name: tmp, emptyDir: {}}
