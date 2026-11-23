@@ -8,7 +8,8 @@ Checks, waiting up to --timeout seconds for each service to come up:
 1. API ready (database and Redis), security headers present, /metrics refuses requests without the token.
 2. A chat message streams end to end through the model host: message.start → tokens → message.end, with tokens
    counted, and the conversation and wallet endpoints answer.
-3. /metrics (with the token) shows the message, including host and cached prompt tokens.
+3. /metrics (with the token) counts the message on every scrape, whichever worker answers, with host and
+   cached prompt tokens.
 4. Prometheus scrapes the API and has loaded the alert rules.
 5. Grafana is healthy, its Prometheus data source works, and the AgencyOS Assistant dashboard is provisioned.
 Prints one line per check and exits 1 on the first failure.
@@ -103,12 +104,21 @@ def check_chat(api: str) -> dict:
 def check_metrics(api: str, token: str) -> None:
     status, _, _ = request("GET", f"{api}/metrics")
     assert status == 401, f"/metrics without token should be 401, got {status}"
-    status, _, body = request("GET", f"{api}/metrics", {"Authorization": f"Bearer {token}"})
-    text = body.decode()
-    assert status == 200, f"/metrics with token: {status}"
-    for name in ("aos_chat_messages_total", "aos_chat_host_tokens_total", "aos_chat_host_cached_prompt_tokens_total"):
-        assert name in text, f"{name} missing from /metrics"
-    ok("/metrics refuses requests without the token and shows chat, host and cache counters")
+    # Several scrapes: with several worker processes, each must report the total, not one worker's own counts.
+    for attempt in range(10):
+        status, _, body = request("GET", f"{api}/metrics", {"Authorization": f"Bearer {token}"})
+        text = body.decode()
+        assert status == 200, f"/metrics with token: {status}"
+        for name in ("aos_chat_host_tokens_total", "aos_chat_host_cached_prompt_tokens_total"):
+            assert name in text, f"{name} missing from /metrics"
+        messages = sum(
+            float(line.rsplit(" ", 1)[1]) for line in text.splitlines() if line.startswith("aos_chat_messages_total{")
+        )
+        assert messages >= 1, (
+            f"scrape {attempt + 1}: the chat message isn't counted (workers not sharing metrics? "
+            "set PROMETHEUS_MULTIPROC_DIR)"
+        )
+    ok("/metrics refuses requests without the token; 10 scrapes all count the message (workers share metrics)")
 
 
 def check_prometheus(prom: str, timeout: float) -> None:

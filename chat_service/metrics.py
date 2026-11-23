@@ -1,13 +1,19 @@
 """Prometheus metrics (Phase 12). Scraped from ``GET /metrics`` (protect with ``CHAT_METRICS_TOKEN``).
 
 Alert rules for the launch SLOs are in ``ops/prometheus/alerts.yml``.
+
+Several worker processes (uvicorn ``--workers``): each process counts its own requests, so ``/metrics`` must add them
+up, or every scrape would show whichever worker answered. Set ``PROMETHEUS_MULTIPROC_DIR`` to an empty directory
+before the workers start (the container image does this); each process then writes its counters there and
+``render()`` sums them. Only counters and histograms are used, which add up correctly across processes.
 """
 
 from __future__ import annotations
 
+import os
 import time
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest, multiprocess
 
 _LATENCY_BUCKETS = (0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 13, 21, 34, 60)
 
@@ -37,6 +43,10 @@ LIMITER_FAIL_OPEN = Counter("aos_limiter_fail_open_total", "Requests allowed bec
 
 
 def render() -> tuple[bytes, str]:
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        return generate_latest(registry), CONTENT_TYPE_LATEST
     return generate_latest(), CONTENT_TYPE_LATEST
 
 

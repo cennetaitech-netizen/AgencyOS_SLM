@@ -133,7 +133,7 @@ Setup: 2 API instances sharing Postgres 16 and Redis; stand-in model host (`ops/
 - **Data at rest:** encrypted tool results; key handling.
 
 ## 6. Deployment topology (recommended)
-Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply, no response buffering on the stream route) → **2+ API containers** (4 workers each) → Postgres (managed, point-in-time recovery, daily backup restore test) · Redis (managed or container, **no persistence**) · 1 **jobs** container (`python -m chat_service.jobs`, single replica) · model host (managed or vLLM, **prefix caching on**, see `ops/MODEL_HOST.md`) + fallback host · Prometheus + alerting. Secrets (DB URL, model and payment keys, webhook secret, encryption keys, metrics token) come from the secrets manager.
+Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply, no response buffering on the stream route) → **2+ API containers** (4 workers each; the image sets `PROMETHEUS_MULTIPROC_DIR` so `/metrics` sums all workers. Set it yourself if you run uvicorn with `--workers` outside the image) → Postgres (managed, point-in-time recovery, daily backup restore test) · Redis (managed or container, **no persistence**) · 1 **jobs** container (`python -m chat_service.jobs`, single replica) · model host (managed or vLLM, **prefix caching on**, see `ops/MODEL_HOST.md`) + fallback host · Prometheus + alerting. Secrets (DB URL, model and payment keys, webhook secret, encryption keys, metrics token) come from the secrets manager.
 
 ## 7. What still needs people before launch
 1. Payment provider and invoicing route (D9): the last item blocking production start-up.
