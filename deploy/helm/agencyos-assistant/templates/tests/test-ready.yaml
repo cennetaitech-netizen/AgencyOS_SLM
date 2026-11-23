@@ -7,7 +7,7 @@ metadata:
     {{- include "aos.labels" . | nindent 4 }}
   annotations:
     helm.sh/hook: test
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-delete-policy: before-hook-creation  # kept until the next run, so `helm test --logs` can show it
 spec:
   restartPolicy: Never
   automountServiceAccountToken: false
