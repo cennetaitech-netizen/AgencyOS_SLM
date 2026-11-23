@@ -4,7 +4,7 @@ image:
   repository: agencyos-assistant
   tag: ci
   pullPolicy: Never
-environment: staging
+environment: dev   # dev sign-in (X-Dev-* headers) is only allowed in dev and test
 config:
   CHAT_AUTH_PROVIDER: dev
   CHAT_PRODUCT_ADAPTER: mock

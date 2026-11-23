@@ -10,3 +10,4 @@ ml/data
 .ruff_cache
 .env
 dump.rdb
+widget/dist-pilot

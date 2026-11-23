@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chat_service.actions.service import ActionService
 from chat_service.analytics.events import LogAnalyticsSink
-from chat_service.api.auth import AuthProvider, DevAuthProvider, ProductAuthProvider
+from chat_service.api.auth import AuthProvider, DevAuthProvider, InviteAuthProvider, ProductAuthProvider
 from chat_service.api.security import SecurityMiddleware
 from chat_service.audit import AuditLog
 from chat_service.billing.caps import CapsService, LogNotifier
@@ -67,6 +67,13 @@ class OrgSettingsUpdate(BaseModel):
     timezone: str | None = None
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     model_pin: str | None = Field(default=None, max_length=128)
+
+
+class NewInvite(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    org_name: str = Field(min_length=1, max_length=120)
+    role: Literal["member", "planner", "org_admin", "staff"] = "org_admin"
+    days: int | None = Field(default=None, ge=1, le=365)
 
 
 class PaymentNote(BaseModel):
@@ -152,6 +159,8 @@ def _default_auth(settings: Settings) -> AuthProvider:
         if settings.env not in ("dev", "test"):
             raise RuntimeError("dev auth is only allowed in dev/test environments")
         return DevAuthProvider()
+    if settings.auth_provider == "invite":
+        return InviteAuthProvider(settings.invite_secret)
     return ProductAuthProvider(settings.product_api_base_url)
 
 
@@ -210,6 +219,7 @@ def create_app(
         max_request_bytes=settings.max_request_bytes,
         hsts=is_prod,
         docs_paths=("/docs", "/redoc", "/openapi.json"),
+        web=bool(settings.web_dir),
     )
 
     def services(request: Request) -> Services:
@@ -625,6 +635,48 @@ def create_app(
     from chat_service.api.routes_ops import register_ops_routes
 
     register_ops_routes(app, services, principal, require_role, audited)
+
+    # ------------------------------------------------------------------ test site (invite links)
+
+    @app.get("/chat/me")
+    async def me(p: Principal = Depends(principal)):
+        return {"user_id": str(p.user_id), "org_id": str(p.org_id), "display_name": p.display_name, "roles": p.roles}
+
+    @app.post("/chat/admin/invites", status_code=201, dependencies=[audited("invite_created", target="global")])
+    async def admin_create_invite(
+        body: NewInvite, p: Principal = Depends(require_role("staff_role")), svc: Services = Depends(services)
+    ):
+        """Staff: create a tester's invite link and switch the assistant on for their organisation."""
+        from chat_service.invites import ROLE_PRESETS, InviteError, create_invite
+
+        if svc.settings.auth_provider != "invite":
+            raise HTTPException(404, "invite links are only used with CHAT_AUTH_PROVIDER=invite")
+        try:
+            token, invite = create_invite(
+                svc.settings.invite_secret,
+                body.name,
+                body.org_name,
+                ROLE_PRESETS[body.role],
+                body.days or svc.settings.invite_default_days,
+            )
+        except InviteError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await svc.orgs.upsert(invite.org_id, chat_enabled=True)
+        return {
+            "path": f"/?invite={token}",
+            "name": invite.name,
+            "org_name": invite.org_name,
+            "org_id": str(invite.org_id),
+            "user_id": str(invite.user_id),
+            "role": body.role,
+            "expires_at": datetime.fromtimestamp(invite.expires_at, UTC).isoformat(),
+        }
+
+    if settings.web_dir:
+        from fastapi.staticfiles import StaticFiles
+
+        # Last, so every API route above takes precedence.
+        app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
     return app
 
 

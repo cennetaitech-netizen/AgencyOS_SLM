@@ -2,6 +2,14 @@
 # Run API:  docker run --env-file .env -p 8090:8090 agencyos-assistant
 # Run jobs: docker run --env-file .env agencyos-assistant python -m chat_service.jobs
 # Migrate:  docker run --env-file .env agencyos-assistant alembic upgrade head
+# The hosted test site's pages (widget/pilot); served by the API only when CHAT_WEB_DIR=/app/web is set.
+FROM node:22-slim AS web
+WORKDIR /w
+COPY widget/package.json widget/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY widget/ ./
+RUN npm run build:pilot
+
 FROM python:3.12-slim AS build
 WORKDIR /app
 RUN pip install --no-cache-dir --upgrade pip
@@ -18,6 +26,7 @@ COPY --from=build /install /usr/local
 COPY chat_service ./chat_service
 COPY migrations ./migrations
 COPY alembic.ini ./
+COPY --from=web /w/dist-pilot ./web
 COPY --chmod=755 ops/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 USER app
 EXPOSE 8090

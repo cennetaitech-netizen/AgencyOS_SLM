@@ -10,7 +10,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:pilot": "vite build --config vite.pilot.config.ts",
+    "dev:pilot": "vite --config vite.pilot.config.ts"
   },
   "peerDependencies": {
     "react": "^19.3.1",

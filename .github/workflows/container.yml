@@ -6,10 +6,10 @@ name: container
 
 on:
   push:
-    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**",
+    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**", "widget/**", "render.yaml",
             "migrations/**", "ops/**", ".github/workflows/container.yml"]
   pull_request:
-    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**",
+    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**", "widget/**", "render.yaml",
             "migrations/**", "ops/**", ".github/workflows/container.yml"]
   workflow_dispatch:
 
@@ -25,6 +25,9 @@ jobs:
 
       - name: Image runs as a non-root user
         run: test "$(docker run --rm agencyos-assistant:ci id -u)" = "10001"
+
+      - name: Image contains the test site's pages
+        run: docker run --rm agencyos-assistant:ci test -f /app/web/index.html
 
       - name: Image refuses to start with an unsafe production config
         run: |
@@ -47,13 +50,32 @@ jobs:
       - name: Jobs container is running
         run: test "$(docker compose ps --status running --services | grep -c '^jobs$')" = "1"
 
+      - name: Test site mode (invite links, pages served by the API), as deployed on Render
+        run: |
+          net=$(docker inspect "$(docker compose ps -q api)" -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')
+          docker run -d --name site --network "$net" -p 8091:8090 \
+            -e CHAT_ENV=staging -e CHAT_AUTH_PROVIDER=invite -e CHAT_WEB_DIR=/app/web \
+            -e CHAT_INVITE_SECRET=ci-only-invite-secret-0123456789abcdef \
+            -e CHAT_DATA_ENCRYPTION_KEYS="$(openssl rand -base64 32)" \
+            -e CHAT_DATABASE_URL=postgres://chat:chat@postgres:5432/chat -e CHAT_REDIS_URL=redis://redis:6379/0 \
+            -e CHAT_MODEL_BASE_URL=http://model:8003/v1 -e CHAT_PRODUCT_ADAPTER=mock -e CHAT_PAYMENT_PROVIDER=manual \
+            agencyos-assistant:ci
+          for i in $(seq 1 30); do curl -sf localhost:8091/readyz > /dev/null && break; sleep 2; done
+          link=$(docker exec site python -m chat_service.invites create --name CI --org "AgencyOS CI" --role staff \
+            --base-url http://localhost:8091 | tail -1)
+          python3 ops/check_test_site.py --link "$link"
+
       - name: Logs on failure
         if: failure()
-        run: docker compose --profile monitoring logs --no-color --tail 200
+        run: |
+          docker compose --profile monitoring logs --no-color --tail 200
+          docker logs site --tail 100 || true
 
       - name: Stop the stack
         if: always()
-        run: docker compose --profile monitoring down -v
+        run: |
+          docker rm -f site || true
+          docker compose --profile monitoring down -v
 
   image-scan:
     runs-on: ubuntu-latest

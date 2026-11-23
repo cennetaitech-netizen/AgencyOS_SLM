@@ -1,0 +1,77 @@
+# Render Blueprint: the hosted test site (invite links, sample campaign data, real model on Together AI).
+# Guide: docs/TEST_SITE.md. In Render: New → Blueprint → pick this repository → enter CHAT_MODEL_API_KEY → Apply.
+# About $20 a month: web $7, jobs worker $7, Postgres $6, Redis (Key Value) free. Plus model usage on Together.
+services:
+  - type: web
+    name: agencyos-assistant-test
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /readyz
+    preDeployCommand: alembic upgrade head
+    autoDeploy: false            # deploy on purpose (Manual Deploy), not on every push
+    envVars:
+      - fromGroup: agencyos-assistant-test
+      - key: PORT                # the image listens on 8090
+        value: "8090"
+      - key: CHAT_WEB_DIR        # serve the test site's pages from the image
+        value: /app/web
+      - key: CHAT_MODEL_API_KEY  # your Together API key; Render asks for it when you apply the Blueprint
+        sync: false
+      - key: CHAT_INVITE_SECRET  # signs invite links; change it to withdraw every link
+        generateValue: true
+      - key: CHAT_METRICS_TOKEN
+        generateValue: true
+      - key: CHAT_DATABASE_URL
+        fromDatabase: {name: agencyos-assistant-db, property: connectionString}
+      - key: CHAT_REDIS_URL
+        fromService: {type: keyvalue, name: agencyos-assistant-redis, property: connectionString}
+
+  - type: worker               # billing cycles, expiry, retention (python -m chat_service.jobs)
+    name: agencyos-assistant-jobs
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: docker-entrypoint.sh python -m chat_service.jobs
+    autoDeploy: false
+    envVars:
+      - fromGroup: agencyos-assistant-test
+      - key: CHAT_DATABASE_URL
+        fromDatabase: {name: agencyos-assistant-db, property: connectionString}
+      - key: CHAT_REDIS_URL
+        fromService: {type: keyvalue, name: agencyos-assistant-redis, property: connectionString}
+
+  - type: keyvalue             # rate and concurrency limits; nothing here needs to survive a restart
+    name: agencyos-assistant-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []            # reachable only from these services
+
+databases:
+  - name: agencyos-assistant-db
+    plan: basic-256mb
+    databaseName: chat
+    user: chat
+    ipAllowList: []            # reachable only from these services
+
+envVarGroups:
+  - name: agencyos-assistant-test
+    envVars:
+      - key: CHAT_ENV
+        value: staging
+      - key: CHAT_AUTH_PROVIDER
+        value: invite
+      - key: CHAT_PRODUCT_ADAPTER   # sample campaign data until the product API exists
+        value: mock
+      - key: CHAT_PAYMENT_PROVIDER  # no card payments; usage is free during the pilot
+        value: manual
+      - key: CHAT_MODEL_BASE_URL
+        value: https://api.together.xyz/v1
+      - key: CHAT_MODEL_NAME
+        value: Qwen/Qwen2.5-7B-Instruct-Turbo
+      - key: CHAT_GLOBAL_DAILY_HOST_TOKEN_CEILING  # spending cap: at most 5M model tokens a day, all testers
+        value: "5000000"
+      - key: CHAT_DATA_ENCRYPTION_KEYS  # encrypts stored tool results
+        generateValue: true

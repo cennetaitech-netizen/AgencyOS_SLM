@@ -12,5 +12,5 @@
     "isolatedModules": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "demo", "test"]
+  "include": ["src", "demo", "pilot", "test"]
 }

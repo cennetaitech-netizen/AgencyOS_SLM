@@ -1,0 +1,88 @@
+/* Test site shell around the widget. Same palette as the widget (src/styles.css). */
+:root {
+  --p-bg: #eef0f4;
+  --p-card: #ffffff;
+  --p-text: #1b1f27;
+  --p-muted: #5f6878;
+  --p-border: #e1e4ea;
+  --p-accent: #3156d3;
+  --p-warn-bg: #fff6e0;
+  --p-warn: #6b4500;
+  --p-danger: #b42318;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --p-bg: #0f1116;
+    --p-card: #15181e;
+    --p-text: #e6e9ef;
+    --p-muted: #9aa3b2;
+    --p-border: #2e3440;
+    --p-accent: #7d9bff;
+    --p-warn-bg: #3a2f12;
+    --p-warn: #f3c969;
+    --p-danger: #ff8a80;
+  }
+}
+
+/* The widget's buttons outside its own panels (e.g. on the Testers page) */
+:root {
+  --aos-accent: var(--p-accent);
+  --aos-accent-text: #ffffff;
+  --aos-border: var(--p-border);
+  --aos-surface: var(--p-bg);
+  --aos-text: var(--p-text);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --aos-accent-text: #0d1020; }
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--p-bg); color: var(--p-text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+.pilot { display: grid; grid-template-rows: auto auto 1fr; height: 100%; max-width: 1280px; margin: 0 auto; padding: 12px 16px 16px; box-sizing: border-box; gap: 10px; }
+.pilot-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pilot-brand { font-weight: 650; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.pilot-badge { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: var(--p-warn-bg); color: var(--p-warn); }
+.pilot-tabs { display: flex; gap: 4px; flex: 1; }
+.pilot-tabs button { border: 0; background: none; color: var(--p-muted); font: inherit; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.pilot-tabs button:hover { color: var(--p-text); }
+.pilot-tabs button.is-active { background: var(--p-card); color: var(--p-text); font-weight: 600; box-shadow: 0 0 0 1px var(--p-border); }
+.pilot-tabs button:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 2px; }
+.pilot-user { display: flex; align-items: center; gap: 8px; }
+.pilot-muted { color: var(--p-muted); }
+.pilot-banner { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--p-warn-bg); color: var(--p-warn); font-size: 13px; }
+
+.pilot-main { min-height: 0; overflow: auto; }
+.pilot-main--chat { overflow: hidden; }
+.pilot-main--chat > .aos-panel { height: 100%; }
+
+.pilot-message { max-width: 520px; margin: 15vh auto 0; padding: 32px; background: var(--p-card); border: 1px solid var(--p-border); border-radius: 12px; }
+.pilot-message h1 { margin: 0 0 12px; font-size: 22px; }
+
+.pilot-card { background: var(--p-card); border: 1px solid var(--p-border); border-radius: 12px; padding: 24px; max-width: 760px; }
+.pilot-card h2 { margin: 0 0 6px; font-size: 20px; }
+.pilot-card h3 { margin: 24px 0 4px; font-size: 16px; }
+.pilot-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-top: 16px; align-items: end; }
+.pilot-form label { display: grid; gap: 4px; font-weight: 500; }
+.pilot-form input, .pilot-form select, .pilot-link-row input { font: inherit; padding: 7px 9px; border: 1px solid var(--p-border); border-radius: 8px; background: var(--p-card); color: var(--p-text); }
+.pilot-form .aos-btn { justify-self: start; }
+.pilot-error { color: var(--p-danger); }
+.pilot-inline { display: inline-flex; gap: 8px; align-items: center; margin: 8px 0; }
+.pilot-inline select { font: inherit; padding: 5px 8px; border: 1px solid var(--p-border); border-radius: 8px; background: var(--p-card); color: var(--p-text); }
+.pilot-feedback { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 10px; }
+.pilot-feedback li { border: 1px solid var(--p-border); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.pilot-feedback-why { color: var(--p-danger); }
+.pilot-links { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.pilot-link-row { display: flex; gap: 8px; margin-top: 4px; }
+.pilot-link-row input { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+@media (max-width: 720px) {
+  .pilot { padding: 8px; height: auto; min-height: 100%; }
+  .pilot-main--chat { height: calc(100dvh - 24px); }
+  .pilot-header { gap: 8px; }
+  .pilot-tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .pilot-user { margin-left: auto; }
+  .pilot-form { grid-template-columns: 1fr; }
+  .pilot-card { padding: 16px; }
+}

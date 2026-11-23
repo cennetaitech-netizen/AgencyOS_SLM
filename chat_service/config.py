@@ -5,11 +5,12 @@ Defaults follow docs/IMPLEMENTATION_GUIDE.md Section 3.1.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -71,7 +72,13 @@ class Settings(BaseSettings):
     # Product API (the existing AgencyOS product)
     product_api_base_url: str = "http://localhost:8000"
     product_adapter: Literal["http", "mock"] = "mock"
-    auth_provider: Literal["dev", "product"] = "dev"
+    auth_provider: Literal["dev", "product", "invite"] = "dev"
+    # "invite": sign-in with signed invite links, for a hosted test site before the product's own sign-in exists
+    # (chat_service/invites.py). Staff create links in the test site or with `python -m chat_service.invites`.
+    invite_secret: str = Field(default="", repr=False)
+    invite_default_days: int = 30
+    # Serve the test site's web pages (the widget's pilot app, built into the image at /app/web) from this folder.
+    web_dir: str | None = None
 
     # Payments (token packs)
     # "manual": no online payments. Pack orders show payment instructions and AgencyOS staff confirm them once the
@@ -115,7 +122,8 @@ class Settings(BaseSettings):
     # Production hardening (Phase 12)
     cors_allowed_origins: list[str] = Field(default_factory=list)  # e.g. ["https://app.agencyos.example"]
     max_request_bytes: int = 256_000
-    data_encryption_keys: list[str] = Field(default_factory=list, repr=False)  # Fernet keys; first = current
+    # Fernet keys, first = current: a JSON list, or one key. See chat_service/crypto.py.
+    data_encryption_keys: Annotated[list[str], NoDecode] = Field(default_factory=list, repr=False)
     redis_url: str | None = None  # shared rate/concurrency limits across instances
     stream_slot_lease_seconds: int = 180  # a crashed instance's slots free up after this
     metrics_token: str | None = Field(default=None, repr=False)  # bearer token for GET /metrics
@@ -124,12 +132,33 @@ class Settings(BaseSettings):
     org_admin_role: str = "org_admin"
     staff_role: str = "agencyos_staff"
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _async_driver(cls, v: str) -> str:
+        """Hosts such as Render hand out postgres:// or postgresql:// URLs; the service needs the asyncpg driver."""
+        for prefix in ("postgres://", "postgresql://"):
+            if isinstance(v, str) and v.startswith(prefix):
+                return "postgresql+asyncpg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("data_encryption_keys", mode="before")
+    @classmethod
+    def _keys(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            return json.loads(v) if v.startswith("[") else [v]
+        return v
+
 
 def production_problems(s: Settings) -> list[str]:
     """Settings that are fine for development but unsafe in production. The app refuses to start with any."""
     problems = []
     if s.auth_provider == "dev":
         problems.append("CHAT_AUTH_PROVIDER=dev (header-based identities) is not allowed")
+    if s.auth_provider == "invite":
+        problems.append("CHAT_AUTH_PROVIDER=invite is for test sites; production uses the product's sign-in")
     if s.product_adapter != "http":
         problems.append("CHAT_PRODUCT_ADAPTER must be 'http' (the mock product is for development)")
     if s.payment_provider == "dev":

@@ -21,11 +21,20 @@ _SECURITY_HEADERS = [
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
     (b"cache-control", b"no-store"),
 ]
+# The test site's own pages (CHAT_WEB_DIR): scripts and styles from this origin only, nothing else.
+_WEB_CSP = (
+    b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    b"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+)
+_API_PREFIXES = ("/chat/", "/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json")
 
 
 class SecurityMiddleware:
-    def __init__(self, app, max_request_bytes: int, hsts: bool, docs_paths: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, app, max_request_bytes: int, hsts: bool, docs_paths: tuple[str, ...] = (), web: bool = False
+    ) -> None:
         self.app = app
+        self.web = web
         self.max_bytes = max_request_bytes
         self.hsts = hsts
         self.docs_paths = docs_paths
@@ -55,7 +64,9 @@ class SecurityMiddleware:
                     raise _TooLarge()
             return message
 
-        is_docs = any(scope.get("path", "").startswith(p) for p in self.docs_paths)
+        path = scope.get("path", "")
+        is_docs = any(path.startswith(p) for p in self.docs_paths)
+        is_web = self.web and not path.startswith(_API_PREFIXES)
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":
@@ -64,6 +75,10 @@ class SecurityMiddleware:
                 for k, v in _SECURITY_HEADERS:
                     if is_docs and k in (b"content-security-policy", b"x-frame-options"):
                         continue  # the interactive API docs need scripts; disabled in production anyway
+                    if is_web and k == b"content-security-policy":
+                        v = _WEB_CSP
+                    if is_web and k == b"cache-control" and path.startswith("/assets/"):
+                        v = b"public, max-age=31536000, immutable"  # file names change with every build
                     if k not in existing:
                         hdrs.append((k, v))
                 if self.hsts:

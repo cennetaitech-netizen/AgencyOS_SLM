@@ -4,7 +4,7 @@ import type { AssistantItem, ChatItem } from "../hooks/useChat";
 import { ActionCard } from "./ActionCard";
 import { Markdown } from "./Markdown";
 
-const REASONS: [string, string][] = [
+export const FEEDBACK_REASONS: [string, string][] = [
   ["wrong_numbers", "Wrong numbers"],
   ["didnt_understand", "Didn't understand me"],
   ["too_long", "Too long"],
@@ -98,7 +98,7 @@ function AssistantMessage({ item, onRate, onAction }: { item: AssistantItem } & 
           <label>
             What was wrong?{" "}
             <select value={reason} onChange={(e) => setReason(e.target.value)}>
-              {REASONS.map(([v, l]) => (
+              {FEEDBACK_REASONS.map(([v, l]) => (
                 <option key={v} value={v}>
                   {l}
                 </option>

@@ -6,12 +6,16 @@
 * Encrypted values are stored as ``{"_enc": "fernet", "v": "<token>"}``, so plain historical rows keep working.
 
 Generate a key: ``python -m chat_service.crypto genkey``. Keep keys in the secrets manager, never in code.
+A random secret of 32+ characters that isn't a Fernet key (e.g. one a hosting platform generated) is also accepted:
+the Fernet key is derived from it with SHA-256, so the same secret always gives the same key.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
 import json
 from typing import Any
 
@@ -22,9 +26,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 _TAG = "fernet"
 
 
+def as_fernet(key: str | bytes) -> Fernet:
+    raw = key.encode() if isinstance(key, str) else key
+    try:
+        return Fernet(raw)
+    except ValueError:
+        if len(raw) < 32:
+            raise ValueError("encryption key must be a Fernet key or a random secret of 32+ characters") from None
+        return Fernet(base64.urlsafe_b64encode(hashlib.sha256(raw).digest()))
+
+
 class FieldCipher:
     def __init__(self, keys: list[str] | None = None) -> None:
-        self._f = MultiFernet([Fernet(k.encode() if isinstance(k, str) else k) for k in keys]) if keys else None
+        self._f = MultiFernet([as_fernet(k) for k in keys]) if keys else None
 
     @property
     def enabled(self) -> bool:

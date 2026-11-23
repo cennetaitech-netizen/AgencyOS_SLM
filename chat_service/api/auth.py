@@ -62,3 +62,25 @@ class ProductAuthProvider:
             roles=tuple(me.get("roles", [])),
             credential=token,
         )
+
+
+class InviteAuthProvider:
+    """Signed invite links for a hosted test site (chat_service/invites.py). Not allowed in production."""
+
+    def __init__(self, secret: str) -> None:
+        from chat_service.invites import check_secret
+
+        check_secret(secret)
+        self._secret = secret
+
+    async def authenticate(self, request: Request) -> Principal:
+        from chat_service.invites import InviteError, read_invite
+
+        header = request.headers.get("Authorization", "")
+        if not header.lower().startswith("bearer "):
+            raise HTTPException(401, "missing bearer token")
+        try:
+            invite = read_invite(self._secret, header[7:])
+        except InviteError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        return Principal(invite.user_id, invite.org_id, invite.name, invite.roles)
