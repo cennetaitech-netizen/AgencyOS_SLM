@@ -17,7 +17,7 @@ Status as of 2026-11-22. ✅ = done and verified · 🟡 = built, needs a real e
 | Dependency vulnerability scans (Python + widget) and secret scanning in CI | ✅ | `.github/workflows/security.yml`; today: **0 known vulnerabilities** in both |
 | Load test at 3× assumed pilot peak, 2 instances | ✅ | §3 |
 | Failure drill (model errors + Redis outage under load) | ✅ | §3, including one finding fixed |
-| Container image and local full stack | 🟡 | `Dockerfile`, `docker-compose.yml` written; **not built here** (no Docker daemon in this environment). Build and smoke-test in CI or staging |
+| Container image and local full stack | ✅ | `.github/workflows/container.yml` on every relevant push. It builds the image, checks it runs as non-root and refuses an unsafe production config, starts the whole compose stack with monitoring, and runs `ops/smoke_stack.py` (API, a streamed chat message, metrics summed across the 4 workers, Prometheus with the alert rules, Grafana with the dashboard). It also scans the image: 0 fixable critical vulnerabilities. The first runs found and fixed two bugs: per-worker metrics, and a model host unreachable inside compose |
 | **External penetration test** | 🟡 | Scope in §5. Needs a vendor (book for weeks 9–10) |
 | **One full real billing cycle** with pilot orgs, reconciled with zero discrepancies | 🟡 | Mechanism and reconciliation built and tested; needs real pilot orgs and the payment provider |
 | Status page, on-call rotation, alert routing (PagerDuty/Opsgenie) | 🟡 | Rules and runbooks ready; tooling and people to assign |
@@ -139,6 +139,6 @@ Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply
 1. Payment provider and invoicing route (D9): the last item blocking production start-up.
 2. Pen-test vendor booked; findings fixed.
 3. On-call rotation, alert routing, status page. Point the dashboard at the production Prometheus.
-4. Container build verified in CI or staging; staging environment with the real product API and model host; load test re-run there.
+4. Staging environment with the real product API and model host; load test and `ops/smoke_stack.py` re-run there (the container build is verified in CI).
 5. One full real billing cycle with pilot orgs, reconciled.
 6. Go/no-go meeting (all owners in the RACI).

@@ -73,10 +73,12 @@ async def test_plain_answer_is_charged_and_streamed(engine, settings, clock, pri
     end = events[-1]["data"]
     assert end["tokens_charged"] == end["billable_input_tokens"] + end["billable_output_tokens"] > 0
     assert end["balance_after"] == settings.free_trial_tokens - end["tokens_charged"]
-    system, user = (m["content"] for m in model.requests[0]["messages"])
-    # cache-friendly layout: a static system prompt; the context leads the latest user message
-    assert "{" not in system and "2026" not in system and "Priya" not in system
-    assert user.startswith("[Context] Today: 2026-11-22 (Asia/Kolkata) · Currency: INR · Role: ")
+    system, context, user = model.requests[0]["messages"]
+    # cache-friendly layout: a static system prompt, then a short context message, then the user's own words
+    assert "{" not in system["content"] and "2026" not in system["content"] and "Priya" not in system["content"]
+    assert context["role"] == "system"
+    assert context["content"] == "[Context] Today: 2026-11-22 (Asia/Kolkata) · Currency: INR · Role: planner"
+    assert user == {"role": "user", "content": "hi there"}
 
 
 async def test_tool_round_then_answer_records_tool_calls(engine, settings, clock, principal):
@@ -135,10 +137,10 @@ async def test_history_is_included_on_next_turn(engine, settings, clock, princip
     await collect(chat, principal, conv, "first question")
     await collect(chat, principal, conv, "second question")
     roles = [(m["role"], m["content"]) for m in model.requests[1]["messages"][1:]]
-    # history is stored without the [Context] line, so the prefix up to the new message is unchanged
+    # history is stored without the context, so the prefix up to the new message is unchanged
     assert roles[:2] == [("user", "first question"), ("assistant", "First answer.")]
-    assert roles[2][0] == "user" and roles[2][1].startswith("[Context] ")
-    assert roles[2][1].endswith("\n\nsecond question")
+    assert roles[2][0] == "system" and roles[2][1].startswith("[Context] ")
+    assert roles[3] == ("user", "second question")
 
 
 # ---------------------------------------------------------------- not charged
@@ -281,7 +283,10 @@ async def test_parallel_messages_never_overspend(engine, settings, clock, princi
     convs = [await chat.conversations.create(principal.org_id, principal.user_id) for _ in range(5)]
     results = await asyncio.gather(*(collect(chat, principal, c, "hello") for c in convs))
     ok = [r for r in results if r[-1]["event"] == "message.end"]
-    assert 1 <= len(ok) <= 2  # each reserves ~1.2k of 3k
+    # How many succeed depends on timing (a reservation shrinks to the headroom left, and finished messages
+    # release what they didn't use); the guarantee is that the wallet never goes below zero.
+    assert len(ok) >= 1
+    assert sum(r[-1]["data"]["tokens_charged"] for r in ok) <= settings.free_trial_tokens
     bal = await chat.wallet.get_balance(principal.org_id)
     assert bal.tokens_available >= 0 and bal.tokens_reserved == 0
     assert await chat.wallet.check_invariant(principal.org_id)

@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-22 · Backend tests: **175 passing** (Postgres 16 + Redis) · Widget tests: **19 passing** · Migrations: 0001–0005
+Last updated: 2026-11-23 · Backend tests: **177 passing** (Postgres 16 + Redis) · Widget tests: **19 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -34,4 +34,4 @@ Last updated: 2026-11-22 · Backend tests: **175 passing** (Postgres 16 + Redis)
 | The product's design system | Restyling the widget via `--aos-*` variables; embedding it in the product shell |
 
 ## Remaining engineering (no external input needed)
-1. Build and smoke-test the container image (and the compose `monitoring` profile) in CI; there's no Docker daemon in this environment.
+None. The container image and the full compose stack (with monitoring) are built and smoke-tested in CI (`container.yml`). Everything left needs one of the inputs above.

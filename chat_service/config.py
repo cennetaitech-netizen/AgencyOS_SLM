@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     tool_timeout_seconds: float = 15.0
     tool_result_max_chars: int = 8000
     prompt_version: str = "system_v3"  # static, cache-friendly (see engine/prompting.py); v1 still works
+    prompt_context_placement: Literal["system_message", "user_prefix"] = "system_message"
 
     # Wallet / billing
     reservation_ttl_seconds: int = 300

@@ -60,7 +60,9 @@ async def run_case(model: ModelClient, case: dict[str, Any], meta: dict[str, Any
     registry = build_registry(settings, MockProductAPI())
     tokenizer = DevRegexTokenizer()
     prompt_ctx = PromptContext(meta["today"], meta["timezone"], meta["currency"], "planner", "Evaluator")
-    messages = build_messages(load_prompt(settings.prompt_version), prompt_ctx, [], case["question"])
+    messages = build_messages(
+        load_prompt(settings.prompt_version), prompt_ctx, [], case["question"], settings.prompt_context_placement
+    )
     ctx = ToolContext(org_id=uuid.uuid4(), user_id=uuid.uuid4(), request_id=case["id"])
     res = CaseResult(case["id"])
     visible = ""

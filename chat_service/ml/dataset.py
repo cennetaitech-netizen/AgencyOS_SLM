@@ -85,12 +85,18 @@ def is_validation(record: dict[str, Any], fraction: float = 0.05) -> bool:
 
 
 def prompt_prefix(
-    template: str, created_at, timezone: str, currency: str, history: list[dict[str, Any]], user_text: str
+    template: str,
+    created_at,
+    timezone: str,
+    currency: str,
+    history: list[dict[str, Any]],
+    user_text: str,
+    placement: str = "system_message",
 ) -> list[dict[str, Any]]:
     """System prompt, history and the user's message laid out exactly as the engine sends them
     (engine/prompting.py), with the context as of the message's own date in the org's timezone."""
     ctx = PromptContext.at(created_at, timezone, currency, role="member")
-    return build_messages(template, ctx, history, user_text)
+    return build_messages(template, ctx, history, user_text, placement)
 
 
 async def export_records(
@@ -213,7 +219,7 @@ async def export_records(
                 )
                 if keep:
                     record = {
-                        "messages": _scrub_obj([*prefix, *good_answer[1:]]),
+                        "messages": _scrub_obj([*prefix, *good_answer[1:]]),  # turn[0] is the user message
                         "tools": tools,
                         "meta": {
                             "source": "correction" if corrected else source,

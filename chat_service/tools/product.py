@@ -321,7 +321,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="list_clients",
             label="Looking up clients",
             group="planning",
-            description="Clients this user can access, with IDs.",
+            description="List the clients this user can access, with their IDs.",
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=handler("list_clients"),
         ),
@@ -329,7 +329,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="list_campaigns",
             label="Looking up campaigns",
             group="planning",
-            description="Campaigns: ID, name, platform, status, budget, flight dates.",
+            description="List campaigns (ID, name, platform, status, budget, flight dates), by client or status.",
             parameters={
                 "type": "object",
                 "properties": {

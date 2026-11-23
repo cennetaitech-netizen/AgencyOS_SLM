@@ -184,7 +184,7 @@ class ChatEngine:
         if version not in self._templates:
             self._templates[version] = load_prompt(version)
         ctx = PromptContext.at(self.clock(), org.timezone, org.currency, principal.primary_role, principal.display_name)
-        return build_messages(self._templates[version], ctx, history, text)
+        return build_messages(self._templates[version], ctx, history, text, self.s.prompt_context_placement)
 
     def _usage(self, turn: _Turn) -> UsageRecord:
         return UsageRecord(
