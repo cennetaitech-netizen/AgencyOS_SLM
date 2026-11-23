@@ -11,7 +11,15 @@ services:
       CHAT_MODEL_BASE_URL: ${CHAT_MODEL_BASE_URL:-http://model:8003/v1}
       CHAT_MODEL_NAME: ${CHAT_MODEL_NAME:-media-slm-dev}
       CHAT_MODEL_API_KEY: ${CHAT_MODEL_API_KEY:-}
+      # More models (see .env.testsite): Google Gemini, Ollama on this computer, any other OpenAI-compatible host
+      CHAT_GEMINI_API_KEY: ${CHAT_GEMINI_API_KEY:-}
+      CHAT_GEMINI_MODEL: ${CHAT_GEMINI_MODEL:-gemini-3.5-flash-lite}
+      CHAT_OLLAMA_BASE_URL: ${CHAT_OLLAMA_BASE_URL:-}
+      CHAT_OLLAMA_MODELS: ${CHAT_OLLAMA_MODELS:-qwen2.5:7b}
+      CHAT_MODELS: ${CHAT_MODELS:-}
+      CHAT_DEFAULT_MODEL: ${CHAT_DEFAULT_MODEL:-}
       CHAT_PAYMENT_PROVIDER: manual
       CHAT_GLOBAL_DAILY_HOST_TOKEN_CEILING: "5000000"
+    extra_hosts: ["host.docker.internal:host-gateway"]  # Ollama on this computer (Docker Desktop has it already)
   jobs:
     environment: *site

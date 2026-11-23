@@ -74,6 +74,7 @@ class NewInvite(BaseModel):
     org_name: str = Field(min_length=1, max_length=120)
     role: Literal["member", "planner", "org_admin", "staff"] = "org_admin"
     days: int | None = Field(default=None, ge=1, le=365)
+    model: str | None = Field(default=None, max_length=128)  # answer this organisation with this model
 
 
 class PaymentNote(BaseModel):
@@ -114,7 +115,7 @@ class Services:
         self.audit = AuditLog(db)
         self.rate_limiter, self.concurrency_limiter = build_limiters(settings)
         self.model = model
-        self.rollout = model.store if isinstance(model, ModelRouter) else RolloutStore(db, settings.model_name)
+        self.rollout = model.store if isinstance(model, ModelRouter) else RolloutStore(db, model.name)
         self.chat = ChatEngine(
             settings,
             self.wallet,
@@ -147,11 +148,49 @@ def _client_for(settings: Settings, model_name: str) -> ModelClient:
     return FallbackModelClient(primary, fallback)
 
 
-def _default_model(settings: Settings, db: AsyncEngine) -> ModelClient:
-    """A router over the production model and any extra versions (e.g. fine-tuned LoRA adapters on the same
-    host), so canary rollouts and per-org pinning work without code changes."""
+def model_clients(settings: Settings) -> dict[str, ModelClient]:
+    """Every configured model, by name: the main host's models, then Gemini, Ollama and any others."""
     names = [settings.model_name, *[n for n in settings.extra_model_names if n != settings.model_name]]
-    return ModelRouter(RolloutStore(db, settings.model_name), {n: _client_for(settings, n) for n in names})
+    clients: dict[str, ModelClient] = {n: _client_for(settings, n) for n in names}
+    timeout = settings.model_timeout_seconds
+    if settings.gemini_api_key:
+        clients[settings.gemini_model] = OpenAICompatibleClient(
+            settings.gemini_base_url, settings.gemini_api_key, settings.gemini_model, timeout
+        )
+    if settings.ollama_base_url:
+        for m in settings.ollama_models:
+            clients[m] = OpenAICompatibleClient(settings.ollama_base_url, "", m, settings.ollama_timeout_seconds)
+    for ep in settings.models:
+        clients[ep.name] = OpenAICompatibleClient(ep.base_url, ep.api_key, ep.model or ep.name, timeout, name=ep.name)
+    return clients
+
+
+def default_model_name(settings: Settings, clients: dict[str, ModelClient]) -> str:
+    if settings.default_model:
+        if settings.default_model not in clients:
+            raise RuntimeError(
+                f"CHAT_DEFAULT_MODEL={settings.default_model!r} is not a configured model "
+                f"(configured: {', '.join(clients)})"
+            )
+        return settings.default_model
+    if settings.gemini_api_key:
+        return settings.gemini_model
+    if settings.ollama_base_url and settings.ollama_models:
+        return settings.ollama_models[0]
+    return settings.model_name
+
+
+def _default_model(settings: Settings, db: AsyncEngine) -> ModelClient:
+    """A router over every configured model (main host and its extra versions, Gemini, Ollama, others), so the
+    default model, canary rollouts and per-org pinning work without code changes."""
+    clients = model_clients(settings)
+    return ModelRouter(RolloutStore(db, default_model_name(settings, clients)), clients)
+
+
+def _check_model(svc: Services, name: str) -> None:
+    known = svc.model.clients if isinstance(svc.model, ModelRouter) else {svc.model.name: svc.model}
+    if name not in known:
+        raise HTTPException(422, f"unknown model {name!r}; configured: {', '.join(sorted(known))}")
 
 
 def _default_auth(settings: Settings) -> AuthProvider:
@@ -609,6 +648,10 @@ def create_app(
         svc: Services = Depends(services),
     ):
         values = body.model_dump(exclude_none=True)
+        if values.get("model_pin"):
+            _check_model(svc, values["model_pin"])
+        elif "model_pin" in values:
+            values["model_pin"] = None  # "" clears the pin: the organisation gets the default model again
         if "timezone" in values:
             from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -661,7 +704,11 @@ def create_app(
             )
         except InviteError as exc:
             raise HTTPException(422, str(exc)) from exc
-        await svc.orgs.upsert(invite.org_id, chat_enabled=True)
+        if body.model:
+            _check_model(svc, body.model)
+            await svc.orgs.upsert(invite.org_id, chat_enabled=True, model_pin=body.model)
+        else:
+            await svc.orgs.upsert(invite.org_id, chat_enabled=True)
         return {
             "path": f"/?invite={token}",
             "name": invite.name,

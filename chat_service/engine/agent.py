@@ -25,6 +25,7 @@ from chat_service.config import Settings
 from chat_service.engine.grounding import ungrounded_numbers
 from chat_service.engine.limits import ConcurrencyLimiter, MemoryConcurrencyLimiter, MemoryRateLimiter, RateLimiter
 from chat_service.engine.prompting import PromptContext, build_messages, load_prompt
+from chat_service.engine.search_links import search_links
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, ModelError, StreamEnd, TextDelta
 from chat_service.principal import Principal
@@ -71,6 +72,7 @@ class _Turn:
     ttft_ms: int | None = None
     sources: list[Any] | None = None  # data the answer may draw numbers from (grounding check)
     tools_used: list[str] | None = None
+    appendix: str = ""  # text the engine adds after the model's answer (shown and saved, never billed)
 
 
 class ChatEngine:
@@ -324,6 +326,7 @@ class ChatEngine:
                         "content": step_text or None,
                         "tool_calls": [
                             {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
+                            | ({"extra_content": c.extra_content} if c.extra_content else {})
                             for c in end.tool_calls
                         ],
                     }
@@ -387,6 +390,10 @@ class ChatEngine:
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": result.for_model()})
 
             refusal = turn.visible.strip().startswith(REFUSAL_SENTENCE)
+            if refusal and s.search_links_on_refusal:
+                turn.appendix = search_links(text)
+                if turn.appendix:
+                    yield event("token", text=turn.appendix)
             charge = not (refusal and not s.bill_refusals)
             charged = await self._finalise(
                 principal, org, conversation_id, turn, charge, "refusal" if refusal else None
@@ -510,7 +517,7 @@ class ChatEngine:
         await self.conversations.add_message(
             conversation_id,
             "assistant",
-            turn.visible,
+            turn.visible + turn.appendix,
             message_id=turn.message_id,
             tokens_charged=charged,
             prompt_version=turn.prompt_version,

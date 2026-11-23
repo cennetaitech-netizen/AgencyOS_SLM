@@ -9,8 +9,17 @@ import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class ModelEndpoint(BaseModel):
+    """One more model on any OpenAI-compatible host (see ``Settings.models``)."""
+
+    name: str = Field(min_length=1, max_length=128)  # shown to staff; used for pinning and usage records
+    base_url: str
+    model: str | None = None  # the id the host expects; defaults to ``name``
+    api_key: str = Field(default="", repr=False)
 
 
 class Settings(BaseSettings):
@@ -28,6 +37,22 @@ class Settings(BaseSettings):
     model_fallback_api_key: str = Field(default="", repr=False)
     model_fallback_name: str | None = None
     model_timeout_seconds: float = 60.0
+
+    # More models. Staff choose the default model, and can give an organisation its own (Models tab, or
+    # chat_org_settings.model_pin). Every model here must be reachable through an OpenAI-compatible API.
+    # Google Gemini: set the API key (from aistudio.google.com) to add it.
+    gemini_api_key: str = Field(default="", repr=False)
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    # Ollama: set its URL to add its models, e.g. http://host.docker.internal:11434/v1 from inside Docker.
+    ollama_base_url: str | None = None
+    ollama_models: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["qwen2.5:7b"])  # comma-separated
+    ollama_timeout_seconds: float = 300.0  # local models can take a while to load the first time
+    # Any other OpenAI-compatible host, as JSON: [{"name": "...", "base_url": "...", "model": "...", "api_key": "..."}]
+    models: Annotated[list[ModelEndpoint], NoDecode] = Field(default_factory=list)
+    # The model that answers unless staff choose another. Unset: Gemini if its key is set, else the first Ollama
+    # model if Ollama is set, else ``model_name``.
+    default_model: str | None = None
     model_temperature: float = 0.2
 
     # Agent loop limits
@@ -39,6 +64,8 @@ class Settings(BaseSettings):
     max_turns_per_conversation: int = 40
     tool_timeout_seconds: float = 15.0
     tool_result_max_chars: int = 8000
+    # Off-topic questions: after the assistant's refusal, add links to search the question on the web (no answer).
+    search_links_on_refusal: bool = True
     prompt_version: str = "system_v3"  # static, cache-friendly (see engine/prompting.py); v1 still works
     # where the [Context] line goes: first line of the latest user message (default; best on Qwen2.5-3B, works with
     # every chat template) or its own system message before it (see docs/chat/PROMPT_V3_LOCAL_EVAL.md)
@@ -139,6 +166,25 @@ class Settings(BaseSettings):
         for prefix in ("postgres://", "postgresql://"):
             if isinstance(v, str) and v.startswith(prefix):
                 return "postgresql+asyncpg://" + v[len(prefix) :]
+        return v
+
+    @field_validator("ollama_base_url", "default_model", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @field_validator("ollama_models", mode="before")
+    @classmethod
+    def _comma_list(cls, v):
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return v
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def _models_json(cls, v):
+        if isinstance(v, str):
+            return json.loads(v) if v.strip() else []
         return v
 
     @field_validator("data_encryption_keys", mode="before")

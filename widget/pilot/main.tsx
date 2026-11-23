@@ -9,7 +9,8 @@ const STAFF_ROLE = "agencyos_staff";
 const ADMIN_ROLE = "org_admin";
 
 type Me = { user_id: string; org_id: string; display_name: string; roles: string[] };
-type Page = "chat" | "billing" | "settings" | "testers" | "feedback";
+type Page = "chat" | "billing" | "settings" | "testers" | "models" | "feedback";
+type ModelState = { available_models: string[]; default_model: string };
 type CreatedInvite = { name: string; org_name: string; role: string; expires_at: string; link: string };
 
 let memoryToken: string | null = null; // used when the browser blocks storage
@@ -68,6 +69,8 @@ function Testers({ token }: { token: string }) {
   const [org, setOrg] = useState("");
   const [role, setRole] = useState("org_admin");
   const [days, setDays] = useState("30");
+  const [model, setModel] = useState("");
+  const models = useModels(token);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<CreatedInvite[]>([]);
@@ -81,7 +84,7 @@ function Testers({ token }: { token: string }) {
       const resp = await fetch("/chat/admin/invites", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ name, org_name: org, role, days: Number(days) }),
+        body: JSON.stringify({ name, org_name: org, role, days: Number(days), model: model || null }),
       });
       const body = await resp.json();
       if (!resp.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't create the link.");
@@ -127,6 +130,19 @@ function Testers({ token }: { token: string }) {
             <option value="staff">AgencyOS staff: everything, and can invite others</option>
           </select>
         </label>
+        {models.data && models.data.available_models.length > 1 && (
+          <label>
+            Model for this organisation
+            <select value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="">Default ({models.data.default_model})</option>
+              {models.data.available_models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           Valid for (days)
           <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} required />
@@ -161,6 +177,88 @@ function Testers({ token }: { token: string }) {
           </ul>
         </>
       )}
+    </section>
+  );
+}
+
+function useModels(token: string) {
+  const [data, setData] = useState<ModelState | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      const resp = await fetch("/chat/admin/model-rollout", { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) throw new Error();
+      setData(await resp.json());
+    } catch {
+      setError("Couldn't load the models.");
+    }
+  }, [token]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return { data, error, reload: load };
+}
+
+function Models({ token }: { token: string }) {
+  const models = useModels(token);
+  const [choice, setChoice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setSaved("");
+    try {
+      const resp = await fetch("/chat/admin/model-rollout/production", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: choice }),
+      });
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't change the model.");
+      setSaved(choice);
+      await models.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change the model.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const current = models.data?.default_model ?? "";
+  return (
+    <section className="pilot-card">
+      <h2>Models</h2>
+      <p className="pilot-muted">
+        The default model answers every organisation that hasn't been given its own. To give an organisation its own
+        model, pick it when you create its tester link in Testers. Models are added in the server settings
+        (Gemini key, Ollama address or other hosts in .env.testsite).
+      </p>
+      {models.error && <p className="pilot-error" role="alert">{models.error}</p>}
+      {models.data && (
+        <form className="pilot-form" onSubmit={save}>
+          <label>
+            Default model
+            <select value={choice || current} onChange={(e) => setChoice(e.target.value)}>
+              {models.data.available_models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                  {m === current ? " (current)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="aos-btn aos-btn--primary" disabled={busy || !choice || choice === current}>
+            {busy ? "Saving…" : "Use for everyone"}
+          </button>
+        </form>
+      )}
+      {saved && <p className="pilot-muted">Saved: new messages are answered by {saved}.</p>}
+      {error && <p className="pilot-error" role="alert">{error}</p>}
     </section>
   );
 }
@@ -319,7 +417,13 @@ function App() {
     ["chat", "Chat"],
     ["billing", "Billing"],
     ...(canSettings ? ([["settings", "Settings"]] as [Page, string][]) : []),
-    ...(isStaff ? ([["testers", "Testers"], ["feedback", "Feedback"]] as [Page, string][]) : []),
+    ...(isStaff
+      ? ([
+          ["testers", "Testers"],
+          ["models", "Models"],
+          ["feedback", "Feedback"],
+        ] as [Page, string][])
+      : []),
   ];
   const orgName = orgNameOf(token);
 
@@ -360,6 +464,7 @@ function App() {
         {page === "billing" && <BillingPage key={me.user_id} client={client} />}
         {page === "settings" && <AdminPage key={me.user_id} client={client} />}
         {page === "testers" && <Testers token={token} />}
+        {page === "models" && <Models token={token} />}
         {page === "feedback" && <Feedback token={token} />}
       </main>
     </div>

@@ -94,6 +94,14 @@ class RolloutStore:
             raise RolloutError("percent must be 1–100")
         return await self._save(canary_model=model, canary_percent=percent, status="canary", note="canary started")
 
+    async def set_production(self, model: str) -> RolloutState:
+        """Make ``model`` the default for every organisation at once (no canary), e.g. on a test site."""
+        if self.known_models is not None and model not in self.known_models:
+            raise RolloutError(f"no client configured for model {model!r}")
+        return await self._save(
+            production_model=model, canary_model=None, canary_percent=0, status="promoted", note=f"set to {model}"
+        )
+
     async def set_percent(self, percent: int) -> RolloutState:
         st = await self.state()
         if st.status != "canary":

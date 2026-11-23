@@ -1,4 +1,5 @@
-"""OpenAI-compatible streaming chat client (works with vLLM, Together, Fireworks, DeepInfra, Groq, ...).
+"""OpenAI-compatible streaming chat client (works with vLLM, Together, Fireworks, DeepInfra, Groq, Ollama, and
+Google Gemini's OpenAI-compatible endpoint).
 
 The engine depends only on the ``ModelClient`` protocol, so the base model and our fine-tuned SLM can be
 swapped without code changes.
@@ -19,6 +20,9 @@ class ToolCall:
     id: str
     name: str
     arguments: str  # raw JSON string, validated by the tool registry
+    # Provider data that must be sent back with the call on the next turn (Gemini puts its thought signature in
+    # ``extra_content``; Gemini 3 models reject a follow-up turn without it).
+    extra_content: dict[str, Any] | None = None
 
 
 @dataclass
@@ -56,6 +60,27 @@ class ModelClient(Protocol):
     ) -> AsyncIterator[ModelEvent]: ...
 
 
+# JSON-schema "format" values Gemini accepts on tool parameters; it rejects others (e.g. "date").
+_GEMINI_FORMATS = {"enum", "date-time", "float", "double", "int32", "int64"}
+
+
+def gemini_schema(schema: Any) -> Any:
+    """Tool parameter schema in the subset Gemini's function calling accepts."""
+    if isinstance(schema, list):
+        return [gemini_schema(x) for x in schema]
+    if not isinstance(schema, dict):
+        return schema
+    return {
+        k: gemini_schema(v) if k != "properties" else {n: gemini_schema(sub) for n, sub in v.items()}
+        for k, v in schema.items()
+        if not (k == "format" and v not in _GEMINI_FORMATS) and k not in ("$schema", "examples")
+    }
+
+
+def is_gemini(base_url: str) -> bool:
+    return "generativelanguage.googleapis.com" in base_url
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -64,9 +89,11 @@ class OpenAICompatibleClient:
         model: str,
         timeout_seconds: float = 60.0,
         http_client: httpx.AsyncClient | None = None,
+        name: str | None = None,
     ) -> None:
-        self.name = model
-        self._model = model
+        self.name = name or model  # the name used for routing, pinning and usage records
+        self._model = model  # the model id sent to the host
+        self._gemini = is_gemini(base_url)
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = http_client or httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout_seconds)
 
@@ -86,10 +113,15 @@ class OpenAICompatibleClient:
             "stream_options": {"include_usage": True},
         }
         if tools:
+            if self._gemini:
+                tools = [
+                    t | {"function": t["function"] | {"parameters": gemini_schema(t["function"].get("parameters"))}}
+                    for t in tools
+                ]
             body["tools"] = tools
             body["tool_choice"] = "auto"
         started = False
-        calls: dict[int, dict[str, str]] = {}
+        calls: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
         usage: dict[str, int] = {}
         try:
@@ -113,9 +145,11 @@ class OpenAICompatibleClient:
                             yield TextDelta(delta["content"])
                         for tc in delta.get("tool_calls") or []:
                             started = True
-                            slot = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "arguments": ""})
+                            slot = calls.setdefault(_slot(calls, tc), {"id": "", "name": "", "arguments": ""})
                             if tc.get("id"):
                                 slot["id"] = tc["id"]
+                            if tc.get("extra_content"):
+                                slot["extra_content"] = tc["extra_content"]
                             fn = tc.get("function") or {}
                             if fn.get("name"):
                                 slot["name"] += fn["name"]
@@ -128,7 +162,12 @@ class OpenAICompatibleClient:
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
             raise ModelError(f"model stream failed: {type(exc).__name__}", before_first_token=not started) from exc
         tool_calls = [
-            ToolCall(id=c["id"] or f"call_{i}", name=c["name"], arguments=c["arguments"] or "{}")
+            ToolCall(
+                id=c["id"] or f"call_{i}",
+                name=c["name"],
+                arguments=c["arguments"] or "{}",
+                extra_content=c.get("extra_content"),
+            )
             for i, c in sorted(calls.items())
         ]
         yield StreamEnd(
@@ -139,6 +178,19 @@ class OpenAICompatibleClient:
             # OpenAI-compatible hosts report cache hits here (vLLM needs --enable-prompt-tokens-details)
             cached_prompt_tokens=(usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
         )
+
+
+def _slot(calls: dict[int, dict[str, Any]], tc: dict[str, Any]) -> int:
+    """Which tool call a streamed fragment belongs to. OpenAI sends ``index``; some hosts (Gemini) leave it out
+    and send each call whole, with its own id."""
+    if tc.get("index") is not None:
+        return int(tc["index"])
+    if tc.get("id"):
+        for i, c in calls.items():
+            if c["id"] == tc["id"]:
+                return i
+        return len(calls)
+    return max(calls, default=0)
 
 
 class FallbackModelClient:
