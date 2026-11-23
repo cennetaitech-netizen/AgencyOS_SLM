@@ -8,6 +8,9 @@ Usage (dedicated eval database; tables are created if missing):
   python -m chat_service.evals.engine_eval --models evals/models.json \\
       --database-url postgresql+asyncpg://.../chat_eval --out docs/chat/EVAL_RESULTS.md
 Exit code 1 if any model misses a target, so CI can block a prompt/model/tool change.
+
+Each models-file entry may also set ``prompt_version`` / ``prompt_version_actions`` (compare prompts on the same
+model) and ``informational: true`` (reported side by side, but not part of the gate).
 """
 
 from __future__ import annotations
@@ -191,12 +194,11 @@ def render_markdown(summaries: list[dict[str, Any]], details: dict[str, list[Cas
         "|---|---|" + "---|" * len(cats) + "---|---|---|",
     ]
     for s in summaries:
+        gate = ("✅ pass" if s["passes_gate"] else "❌ fail") + (" (comparison only)" if s.get("informational") else "")
         lines.append(
             f"| {s['label']} | {pct(s['overall'])} | "
             + " | ".join(pct(s["by_category"].get(c)) for c in cats)
-            + f" | {pct(s['grounded'])} | {s['executed_without_confirmation']} | "
-            + ("✅ pass" if s["passes_gate"] else "❌ fail")
-            + " |"
+            + f" | {pct(s['grounded'])} | {s['executed_without_confirmation']} | {gate} |"
         )
     for label, results in details.items():
         lines += ["", f"## {label}: failed cases", ""]
@@ -222,6 +224,21 @@ async def run_all(
     return summaries, details
 
 
+def settings_for(base: Settings, cfg: dict[str, Any]) -> Settings:
+    """A models-file entry may name its own prompt versions, e.g. to compare a candidate prompt on the same model."""
+    update = {k: cfg[k] for k in ("prompt_version", "prompt_version_actions") if cfg.get(k)}
+    return base.model_copy(update=update) if update else base
+
+
+def label_for(cfg: dict[str, Any]) -> str:
+    return f"{cfg['label']} · {cfg['prompt_version']}" if cfg.get("prompt_version") else cfg["label"]
+
+
+def gate_passed(summaries: list[dict[str, Any]]) -> bool:
+    """The release gate: every entry not marked ``informational`` must pass."""
+    return all(s["passes_gate"] for s in summaries if not s.get("informational"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", required=True)
@@ -239,16 +256,20 @@ def main() -> None:
         async with db.begin() as conn:
             await conn.run_sync(metadata.create_all)
         settings = Settings(env="test", database_url=args.database_url)
-        factories = {
-            m["label"]: (
-                lambda case, m=m: OpenAICompatibleClient(
-                    m["base_url"], os.environ.get(m.get("api_key_env", ""), ""), m["model"]
-                )
-            )
-            for m in model_cfgs
-        }
+        summaries, details = [], {}
         try:
-            return await run_all(db, settings, factories, data)
+            for m in model_cfgs:
+                factory = {
+                    label_for(m): lambda case, m=m: OpenAICompatibleClient(
+                        m["base_url"], os.environ.get(m.get("api_key_env", ""), ""), m["model"]
+                    )
+                }
+                s, d = await run_all(db, settings_for(settings, m), factory, data)
+                for summary in s:
+                    summary["informational"] = bool(m.get("informational"))
+                summaries += s
+                details |= d
+            return summaries, details
         finally:
             await db.dispose()
 
@@ -257,7 +278,7 @@ def main() -> None:
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(report)
     print(report)
-    sys.exit(0 if all(s["passes_gate"] for s in summaries) else 1)
+    sys.exit(0 if gate_passed(summaries) else 1)
 
 
 if __name__ == "__main__":

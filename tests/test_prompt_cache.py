@@ -17,7 +17,7 @@ from chat_service.tools.registry import ToolContext
 
 def test_default_prompts_are_static_and_older_ones_still_work():
     s = Settings()
-    for version in (s.prompt_version, s.prompt_version_actions, "system_ft_v2"):
+    for version in (s.prompt_version, s.prompt_version_actions, "system_ft_v2", "system_v3c", "system_v3c_actions"):
         assert is_static(load_prompt(version)), version
     for version in ("system_v1", "system_v2", "system_ft_v1"):
         assert not is_static(load_prompt(version))

@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-23 · Backend tests: **186 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
+Last updated: 2026-11-23 · Backend tests: **187 passing** (Postgres 16 + Redis) · Widget tests: **20 passing** · Migrations: 0001–0005 · CI: tests, evals, security scans, container build + full-stack smoke test
 
 ## Done
 | Area | Phase | What exists | Tests |

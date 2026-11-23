@@ -93,3 +93,30 @@ async def test_run_all_with_per_case_scripts(engine, settings):
         engine, settings, {"scripted": lambda c: FakeModelClient(scripts[c["id"]])}, data
     )
     assert summaries[0]["overall"] == 1.0 and summaries[0]["passes_gate"] is True
+
+
+async def test_models_file_entries_can_compare_prompts_without_gating_on_them(engine, settings):
+    from chat_service.engine.prompting import load_prompt
+    from chat_service.evals.engine_eval import gate_passed, label_for, settings_for
+
+    cfg = {
+        "label": "m",
+        "prompt_version": "system_v3c",
+        "prompt_version_actions": "system_v3c_actions",
+        "informational": True,
+    }
+    s = settings_for(settings, cfg)
+    assert (s.prompt_version, s.prompt_version_actions) == ("system_v3c", "system_v3c_actions")
+    assert settings_for(settings, {"label": "m"}) is settings
+    assert label_for(cfg) == "m · system_v3c"
+
+    model = FakeModelClient([FakeTurn(f"{REFUSAL_SENTENCE} Ask me about campaigns.")])
+    data = {**DATA, "cases": [case("o01")]}
+    summaries, _ = await run_all(engine, s, {"cand": lambda c: model}, data)
+    assert model.requests[0]["messages"][0]["content"] == load_prompt("system_v3c")
+
+    gated = {"passes_gate": True}
+    assert gate_passed([gated, {"passes_gate": False, "informational": True}]) is True
+    assert gate_passed([{"passes_gate": False}, {"passes_gate": True, "informational": True}]) is False
+    md = render_markdown([{**summaries[0], "informational": True}], {}, DATA["targets"])
+    assert "(comparison only)" in md

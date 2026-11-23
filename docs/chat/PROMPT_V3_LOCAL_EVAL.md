@@ -49,6 +49,20 @@ Other failures happen under both prompts and are model errors the checks catch c
 - wrong digits flagged by the grounding check (r03: the tool said 11,405 clicks, the model wrote 1,140)
 - sums written without media_math
 
+## Over-refusal experiment (candidate `system_v3c`)
+On 3B, v3 opened two in-scope answers with the off-topic sentence: m04 (write ad copy) and r13 (how do I change a budget). I tested three variants on those plus the 5 off-topic questions and 3 ordinary ones (10 questions):
+
+| Variant | 10-question score | m04 ad copy | r13 how-to | Off-topic refused |
+|---|---|---|---|---|
+| v3 (shipped) | 80% | refused | opened with the off-topic line | 5/5 |
+| a: in-scope types listed first, refuse only "clearly unrelated" | 80% | refused | opened with the off-topic line | 5/5 |
+| b: scope rule moved to the end | 90% | answered | opened with the off-topic line | 5/5 |
+| **c: both (`system_v3c`)** | **90%** | **answered** | **answered normally** | **5/5** |
+
+The wording alone didn't help; moving the rule to the end did. On all 32 questions, c scored **75% twice** (identical runs), the same as v3. It answered every in-scope request and still refused every off-topic one, but 2 more answers had a figure the grounding check couldn't match (r12, a05): grounded 78% vs 88%.
+
+**Decision: v3 stays the default; `system_v3c` is kept as a candidate.** On 3B it swaps one over-refusal for one grounding miss, and grounding is a hard release gate. The eval workflow runs both prompts on the production model and reports c as "comparison only", so the first real run decides. Switching is configuration: `CHAT_PROMPT_VERSION=system_v3c` and `CHAT_PROMPT_VERSION_ACTIONS=system_v3c_actions`.
+
 ## Reproduce
 ```bash
 .venv-ml/bin/python ops/local_model_server.py --model Qwen/Qwen2.5-3B-Instruct --port 8010

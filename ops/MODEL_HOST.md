@@ -36,7 +36,7 @@ Decided 2026-11-23: **Together AI** serving **Qwen2.5-7B-Instruct** (`Qwen/Qwen2
    - `EVAL_MODEL_NAME` = `Qwen/Qwen2.5-7B-Instruct-Turbo`
    - `EVAL_MODEL_API_KEY` = your Together API key
 2. Open Actions → **eval** → **Run workflow**. It also runs by itself whenever prompts, tools, actions, the model client or the eval set change.
-3. The job fails if the gate isn't met: 85% overall, 95% on actions, 100% grounded, nothing executed without confirmation. Download the `eval-report` artifact for per-case results, and check m04 and r13 first (see [docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)).
+3. The job fails if the gate isn't met: 85% overall, 95% on actions, 100% grounded, nothing executed without confirmation. Download the `eval-report` artifact for per-case results. The report has two rows: the shipped prompt, which is the gate, and the candidate `system_v3c`, marked comparison only. If the candidate scores at least as well and is fully grounded, switch to it (see [docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)).
 
 **Or run it locally:**
 ```bash

@@ -60,9 +60,13 @@ jobs:
         run: |
           python - <<'EOF'
           import json, os
-          json.dump([{"label": os.environ["EVAL_MODEL_NAME"], "base_url": os.environ["EVAL_MODEL_BASE_URL"],
-                      "model": os.environ["EVAL_MODEL_NAME"], "api_key_env": "EVAL_MODEL_API_KEY"}],
-                    open("evals/models.ci.json", "w"))
+          model = {"label": os.environ["EVAL_MODEL_NAME"], "base_url": os.environ["EVAL_MODEL_BASE_URL"],
+                   "model": os.environ["EVAL_MODEL_NAME"], "api_key_env": "EVAL_MODEL_API_KEY"}
+          # The default prompt is the gate; the candidate prompt (system_v3c: fixes over-refusal on ad copy and
+          # how-to questions) is reported beside it so the real model decides which to ship.
+          candidate = {**model, "prompt_version": "system_v3c", "prompt_version_actions": "system_v3c_actions",
+                       "informational": True}
+          json.dump([model, candidate], open("evals/models.ci.json", "w"))
           EOF
           python -m chat_service.evals.engine_eval --models evals/models.ci.json --out eval-report.md
       - uses: actions/upload-artifact@v4
