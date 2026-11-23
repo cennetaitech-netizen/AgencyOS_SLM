@@ -77,7 +77,7 @@ Setup:
   5. **Margin alert** now follows the **uncached** ratio, plus a new `AosPromptCacheHitLow` alert. The dashboard shows the cache hit rate.
 - **Result:** uncached host tokens per billable token went from about **26× to about 3×**. Simulation of a 2,000-user day: 2.8–3.0×, cache hit about 91%. Load test: 2.3×, hit 94%. With caching but the old layout it would have been 7–8×.
 - **Real-model check of the new prompt:** small open models on CPU, 32-case eval. On Qwen2.5-3B the shipped v3 scored 75% against 72–78% for the old prompt (parity). On 1.5B it scored 62% against 53–56%. One known issue to check on the production model: occasional over-refusal on ad copy and how-to questions. Details and caveats: [docs/chat/PROMPT_V3_LOCAL_EVAL.md](chat/PROMPT_V3_LOCAL_EVAL.md).
-- **Still to do:** re-measure with the real model host and tokenizer in staging, and run the eval gate against the production model (watch data questions). The 20× alert stays as the safety line on the uncached ratio.
+- **Still to do:** re-measure with the real model host and tokenizer in staging. Run the eval gate against the chosen production model, Qwen2.5-7B-Instruct on Together AI: add the three `EVAL_MODEL_*` secrets, then Actions → eval → Run workflow ([ops/MODEL_HOST.md](../ops/MODEL_HOST.md#chosen-host-together-ai)). Watch m04 and r13. The 20× alert stays as the safety line on the uncached ratio.
 
 ## 3. Load test and failure drill (2026-11-22, this environment)
 

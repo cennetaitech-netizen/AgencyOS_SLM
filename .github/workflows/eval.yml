@@ -3,8 +3,19 @@ name: eval
 # Runs the full-engine eval against a real model whenever prompts, tools, the model client or the eval set
 # change, and blocks the PR if a target is missed (overall, actions, grounding, no execution without confirm).
 # Needs repository secrets: EVAL_MODEL_BASE_URL, EVAL_MODEL_NAME, EVAL_MODEL_API_KEY. Skips if they're absent.
+# For Together AI + Qwen2.5-7B: https://api.together.xyz/v1, Qwen/Qwen2.5-7B-Instruct-Turbo, your Together key.
+# Also runs on pushes that change those paths, and on demand (Actions tab → eval → Run workflow).
 
 on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "chat_service/engine/**"
+      - "chat_service/tools/**"
+      - "chat_service/actions/**"
+      - "chat_service/llm/**"
+      - "evals/**"
+      - ".github/workflows/eval.yml"
   pull_request:
     paths:
       - "chat_service/engine/**"
@@ -12,6 +23,7 @@ on:
       - "chat_service/actions/**"
       - "chat_service/llm/**"
       - "evals/**"
+      - ".github/workflows/eval.yml"
 
 jobs:
   engine-eval:

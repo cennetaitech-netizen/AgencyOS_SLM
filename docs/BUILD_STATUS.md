@@ -26,8 +26,8 @@ Last updated: 2026-11-23 · Backend tests: **177 passing** (Postgres 16 + Redis)
 |---|---|
 | **Product repo or API spec** + auth details | Real read/write endpoints (`tools/product.py`), `ProductAuthProvider`, full write inventory |
 | **Product-owner approval** of actions, risk tiers, thresholds | Turning on chat actions for beta orgs |
-| **Model host + keys** | G2 bake-off, eval CI (`EVAL_MODEL_*` secrets), billing tokenizer pin |
-| **Base model choice + GPU + teacher model** | Real SFT/DPO training runs (Phase 11) |
+| **Model host key**: host chosen, **Together AI with Qwen2.5-7B-Instruct** (2026-11-23); add the key as GitHub secrets, see [ops/MODEL_HOST.md](../ops/MODEL_HOST.md#chosen-host-together-ai) | Eval gate in CI (`eval.yml`, now also runs on push and on demand), G2 bake-off, billing tokenizer pin |
+| **GPU + teacher model** (base model chosen: Qwen2.5-7B-Instruct) | Real SFT/DPO training runs (Phase 11) |
 | **Payment provider + invoicing route (D9)**, tax rates | Real checkout, `InvoiceSink` |
 | **Plans and prices (D1/D3)**, host and list prices | Plan catalogue; unit-economics numbers |
 | Notification channel, analytics tool | Replacing `LogNotifier` / `LogAnalyticsSink` |

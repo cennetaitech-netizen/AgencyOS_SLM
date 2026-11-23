@@ -1,0 +1,4 @@
+[
+  {"label": "Qwen2.5-7B-Instruct (Together AI)", "base_url": "https://api.together.xyz/v1",
+   "model": "Qwen/Qwen2.5-7B-Instruct-Turbo", "api_key_env": "TOGETHER_API_KEY"}
+]

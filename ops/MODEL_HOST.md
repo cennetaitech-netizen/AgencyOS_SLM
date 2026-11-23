@@ -27,6 +27,28 @@ vllm serve <base-model> --enable-prefix-caching --enable-prompt-tokens-details \
 
 **Managed hosts** (Fireworks, Together, DeepInfra, ...): prompt caching is usually automatic. Check that the host returns `prompt_tokens_details.cached_tokens` in streamed usage, and ask for the cached-input price.
 
+## Chosen host: Together AI
+Decided 2026-11-23: **Together AI** serving **Qwen2.5-7B-Instruct** (`Qwen/Qwen2.5-7B-Instruct-Turbo`), the same family as the 1.5B and 3B models checked locally.
+
+**Run the release gate in CI (the key stays in GitHub):**
+1. In GitHub, open the repository's Settings → Secrets and variables → Actions, and add three repository secrets:
+   - `EVAL_MODEL_BASE_URL` = `https://api.together.xyz/v1`
+   - `EVAL_MODEL_NAME` = `Qwen/Qwen2.5-7B-Instruct-Turbo`
+   - `EVAL_MODEL_API_KEY` = your Together API key
+2. Open Actions → **eval** → **Run workflow**. It also runs by itself whenever prompts, tools, actions, the model client or the eval set change.
+3. The job fails if the gate isn't met: 85% overall, 95% on actions, 100% grounded, nothing executed without confirmation. Download the `eval-report` artifact for per-case results, and check m04 and r13 first (see [docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)).
+
+**Or run it locally:**
+```bash
+TOGETHER_API_KEY=... python -m chat_service.evals.engine_eval --models evals/models.together.json --database-url postgresql+asyncpg://chat:chat@localhost:5432/chat_eval --out eval-together.md
+```
+
+**Check on the first run:**
+- Tool calls come back as OpenAI `tool_calls`. Together lists function calling per model; if this model doesn't support it, every tool case fails.
+- Streamed usage includes `prompt_tokens_details.cached_tokens`. If not, the dashboard shows "Host doesn't report cache hits" and cost is counted without the cache discount. Ask Together how cached input is billed, and set `CHAT_HOST_PRICE_CACHED_INPUT_PER_1M_MINOR`.
+- "Turbo" models are served quantised. The eval measures the quality you actually get.
+- For the Phase 11 fine-tuned model, check whether Together serves your own LoRA adapter on this base model. If not, plan a dedicated endpoint or vLLM.
+
 ## Tell finance the price
 ```bash
 CHAT_HOST_PRICE_CACHED_INPUT_PER_1M_MINOR=<price per 1M cached prompt tokens>
