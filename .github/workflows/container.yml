@@ -62,9 +62,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t agencyos-assistant:ci .
       - name: Scan the image for known vulnerabilities (fixable critical ones fail the job)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: agencyos-assistant:ci
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+        # Trivy's own container image (pinned); its vulnerability database is downloaded fresh on every run.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 \
+            image --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress agencyos-assistant:ci
