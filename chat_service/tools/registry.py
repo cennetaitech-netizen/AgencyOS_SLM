@@ -51,10 +51,41 @@ class Tool:
     undo_tool: str | None = None
 
     def schema(self) -> dict[str, Any]:
+        """What the model sees. Validation-only keywords are left out (arguments are still validated against
+        the full ``parameters``): they cost prompt tokens on every call and don't change what the model writes."""
         return {
             "type": "function",
-            "function": {"name": self.name, "description": self.description, "parameters": self.parameters},
+            "function": {"name": self.name, "description": self.description, "parameters": model_view(self.parameters)},
         }
+
+
+# JSON-schema keywords that only constrain validation. A boolean additionalProperties is dropped; a schema-valued
+# one (it describes the values, e.g. validate_ad_copy fields) is kept.
+_VALIDATION_ONLY = {
+    "additionalProperties",
+    "pattern",
+    "minLength",
+    "maxLength",
+    "exclusiveMinimum",
+    "minItems",
+    "maxItems",
+}
+
+
+def model_view(schema: Any) -> Any:
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in _VALIDATION_ONLY and not (key == "additionalProperties" and isinstance(value, dict)):
+            continue
+        if key == "properties":
+            out[key] = {name: model_view(sub) for name, sub in value.items()}
+        elif key in ("items", "additionalProperties"):
+            out[key] = model_view(value)
+        else:
+            out[key] = value
+    return out
 
 
 @dataclass

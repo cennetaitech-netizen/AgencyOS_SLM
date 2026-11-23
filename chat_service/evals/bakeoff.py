@@ -27,7 +27,8 @@ import jsonschema
 
 from chat_service.billing.tokenizer import DevRegexTokenizer
 from chat_service.config import Settings
-from chat_service.engine.agent import REFUSAL_SENTENCE, load_prompt
+from chat_service.engine.agent import REFUSAL_SENTENCE
+from chat_service.engine.prompting import PromptContext, build_messages, load_prompt
 from chat_service.llm.client import ModelClient, ModelError, OpenAICompatibleClient, StreamEnd, TextDelta
 from chat_service.tools import build_registry
 from chat_service.tools.product import MockProductAPI
@@ -58,17 +59,8 @@ async def run_case(model: ModelClient, case: dict[str, Any], meta: dict[str, Any
     settings = Settings(env="test")
     registry = build_registry(settings, MockProductAPI())
     tokenizer = DevRegexTokenizer()
-    system = load_prompt(settings.prompt_version).format(
-        today_date=meta["today"],
-        org_timezone=meta["timezone"],
-        org_currency=meta["currency"],
-        user_display_name="Evaluator",
-        user_role="planner",
-    )
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": case["question"]},
-    ]
+    prompt_ctx = PromptContext(meta["today"], meta["timezone"], meta["currency"], "planner", "Evaluator")
+    messages = build_messages(load_prompt(settings.prompt_version), prompt_ctx, [], case["question"])
     ctx = ToolContext(org_id=uuid.uuid4(), user_id=uuid.uuid4(), request_id=case["id"])
     res = CaseResult(case["id"])
     visible = ""

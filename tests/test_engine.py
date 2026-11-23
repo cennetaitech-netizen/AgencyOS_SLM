@@ -73,8 +73,10 @@ async def test_plain_answer_is_charged_and_streamed(engine, settings, clock, pri
     end = events[-1]["data"]
     assert end["tokens_charged"] == end["billable_input_tokens"] + end["billable_output_tokens"] > 0
     assert end["balance_after"] == settings.free_trial_tokens - end["tokens_charged"]
-    system = model.requests[0]["messages"][0]["content"]
-    assert "Today: 2026-11-22 (Asia/Kolkata)" in system and "currency: INR" in system and "Priya" in system
+    system, user = (m["content"] for m in model.requests[0]["messages"])
+    # cache-friendly layout: a static system prompt; the context leads the latest user message
+    assert "{" not in system and "2026" not in system and "Priya" not in system
+    assert user.startswith("[Context] Today: 2026-11-22 (Asia/Kolkata) · Currency: INR · Role: ")
 
 
 async def test_tool_round_then_answer_records_tool_calls(engine, settings, clock, principal):
@@ -133,7 +135,10 @@ async def test_history_is_included_on_next_turn(engine, settings, clock, princip
     await collect(chat, principal, conv, "first question")
     await collect(chat, principal, conv, "second question")
     roles = [(m["role"], m["content"]) for m in model.requests[1]["messages"][1:]]
-    assert roles == [("user", "first question"), ("assistant", "First answer."), ("user", "second question")]
+    # history is stored without the [Context] line, so the prefix up to the new message is unchanged
+    assert roles[:2] == [("user", "first question"), ("assistant", "First answer.")]
+    assert roles[2][0] == "user" and roles[2][1].startswith("[Context] ")
+    assert roles[2][1].endswith("\n\nsecond question")
 
 
 # ---------------------------------------------------------------- not charged
@@ -283,3 +288,22 @@ async def test_parallel_messages_never_overspend(engine, settings, clock, princi
     async with engine.connect() as conn:
         assistant_msgs = (await conn.execute(select(chat_messages).where(chat_messages.c.role == "assistant"))).all()
     assert len(assistant_msgs) == len(ok)
+
+
+async def test_prefix_cache_hits_are_recorded_but_never_billed(engine, settings, clock, principal):
+    from prometheus_client import REGISTRY
+
+    def cached_metric():
+        return REGISTRY.get_sample_value("aos_chat_host_cached_prompt_tokens_total", {"model": "fake-slm"}) or 0
+
+    before = cached_metric()
+    turns = [
+        FakeTurn(tool_calls=[("list_clients", {})], cached_prompt_tokens=300),
+        FakeTurn("Two clients.", cached_prompt_tokens=350),
+    ]
+    chat, model, conv = await make_engine(engine, settings, clock, turns, principal)
+    end = (await collect(chat, principal, conv, "which clients?"))[-1]["data"]
+    row = (await usage_rows(engine))[-1]
+    assert row.host_cached_prompt_tokens == 650 and row.host_prompt_tokens > 650
+    assert end["tokens_charged"] == end["billable_input_tokens"] + end["billable_output_tokens"]  # unchanged
+    assert cached_metric() - before == 650

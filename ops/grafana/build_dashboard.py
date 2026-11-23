@@ -68,6 +68,18 @@ def ratio(num: str, den: str, window: str = WIN) -> str:
     return f"sum(rate({num}{{{SEL}}}[{window}])) / sum(rate({den}{{{SEL}}}[{window}]))"
 
 
+def uncached_ratio(window: str = WIN) -> str:
+    """Model-host tokens that had to be computed (not served from the prefix cache) per billable token."""
+    host = f"sum(rate(aos_chat_host_tokens_total{{{SEL}}}[{window}]))"
+    cached = f"sum(rate(aos_chat_host_cached_prompt_tokens_total{{{SEL}}}[{window}]))"
+    return f"({host} - {cached}) / sum(rate(aos_chat_billable_tokens_total{{{SEL}}}[{window}]))"
+
+
+def cache_hit(window: str = WIN) -> str:
+    cached = f"sum(rate(aos_chat_host_cached_prompt_tokens_total{{{SEL}}}[{window}]))"
+    return f'{cached} / sum(rate(aos_chat_host_tokens_total{{kind="prompt",{SEL}}}[{window}]))'
+
+
 def target(expr: str, legend: str = "", ref: str = "A", instant: bool = False) -> dict:
     t = {"datasource": DS, "expr": expr, "legendFormat": legend or "__auto", "refId": ref, "range": not instant}
     if instant:
@@ -210,11 +222,11 @@ def build() -> dict:
     )
     g.add(
         stat(
-            "Hidden cost ratio (1 h)",
-            ratio("aos_chat_host_tokens_total", "aos_chat_billable_tokens_total", "1h"),
+            "Uncached cost ratio (1 h)",
+            uncached_ratio("1h"),
             "x",
             steps((None, GREEN), (15, AMBER), (20, RED)),
-            "Model-host tokens per billable token (system prompt, tool schemas, tool results). "
+            "Model-host tokens the host had to compute (not served from its prefix cache) per billable token. "
             "Above 20× the margin is at risk. Alert: AosOverheadRatioHigh.",
             decimals=1,
         ),
@@ -313,7 +325,7 @@ def build() -> dict:
     g.row("Tokens and margin")
     g.add(
         ts(
-            "Billable tokens vs model-host tokens (per second)",
+            "Billable vs model-host tokens per second",
             [
                 target(
                     f"sum by (billing_mode) (rate(aos_chat_billable_tokens_total{{{SEL}}}[{WIN}]))",
@@ -321,21 +333,43 @@ def build() -> dict:
                     "A",
                 ),
                 target(f"sum by (kind) (rate(aos_chat_host_tokens_total{{{SEL}}}[{WIN}]))", "host {{kind}}", "B"),
+                target(
+                    f"sum(rate(aos_chat_host_cached_prompt_tokens_total{{{SEL}}}[{WIN}]))", "host prompt (cached)", "C"
+                ),
             ],
             "short",
             "Billable = what clients pay for (or would, in shadow mode). Host = what the model "
-            "actually processed, which drives GPU cost.",
+            "processed; 'host prompt (cached)' is the part served from its prefix cache.",
         ),
-        12,
+        6,
         8,
     )
     g.add(
         ts(
             "Hidden cost ratio",
-            [target(ratio("aos_chat_host_tokens_total", "aos_chat_billable_tokens_total"), "host ÷ billable")],
+            [
+                target(ratio("aos_chat_host_tokens_total", "aos_chat_billable_tokens_total"), "all host tokens", "A"),
+                target(uncached_ratio(), "uncached (drives cost)", "B"),
+            ],
             "x",
-            "Dashed line: 20×, the margin alert. Rising means prompts or tool results grew (runbook rb-margin).",
+            "Host tokens per billable token. Dashed line: 20×, the margin alert on the uncached ratio. "
+            "Rising means prompts or tool results grew, or the prefix cache stopped hitting (runbook rb-margin).",
             threshold=20,
+        ),
+        6,
+        8,
+    )
+    g.add(
+        ts(
+            "Prompt cache hit rate",
+            [target(cache_hit(), "cached ÷ prompt tokens")],
+            "percentunit",
+            "Share of prompt tokens served from the model host's prefix cache. Expect most of it: the system "
+            "prompt and tool schemas are identical for everyone. A drop means caching is off, a prompt change "
+            "broke the shared prefix, or traffic isn't routed to warm replicas. "
+            "Alert below 50%: AosPromptCacheHitLow.",
+            soft_max=1,
+            no_value="Host doesn't report cache hits",
         ),
         6,
         8,

@@ -70,17 +70,16 @@ VALIDATE_AD_COPY = Tool(
     label="Checking ad copy lengths",
     group="builtin",
     description=(
-        "Check ad copy against platform character limits before presenting it. "
-        "Pass every headline/description you wrote; rewrite any line that fails a hard limit."
+        "Check every headline/description you wrote against platform character limits; rewrite any that fail."
     ),
     parameters={
         "type": "object",
         "properties": {
             "platform": {"type": "string", "enum": ["google_ads", "meta"]},
-            "format": {"type": "string", "description": "e.g. responsive_search_ad, single_image_or_video"},
+            "format": {"type": "string", "description": "e.g. responsive_search_ad"},
             "fields": {
                 "type": "object",
-                "description": 'Field name → list of texts, e.g. {"headline": ["..."], "description": ["..."]}',
+                "description": '{"headline": [...], "description": [...]}',
                 "additionalProperties": {"type": "array", "items": {"type": "string"}},
             },
         },

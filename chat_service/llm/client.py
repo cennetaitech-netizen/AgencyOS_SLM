@@ -32,6 +32,7 @@ class StreamEnd:
     tool_calls: list[ToolCall] = field(default_factory=list)
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    cached_prompt_tokens: int | None = None  # part of prompt_tokens served from the host's prefix cache
 
 
 ModelEvent = TextDelta | StreamEnd
@@ -135,6 +136,8 @@ class OpenAICompatibleClient:
             tool_calls=tool_calls,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
+            # OpenAI-compatible hosts report cache hits here (vLLM needs --enable-prompt-tokens-details)
+            cached_prompt_tokens=(usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
         )
 
 

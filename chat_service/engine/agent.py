@@ -15,7 +15,6 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
@@ -25,6 +24,7 @@ from chat_service.billing.wallet import Reservation, UsageRecord, WalletService
 from chat_service.config import Settings
 from chat_service.engine.grounding import ungrounded_numbers
 from chat_service.engine.limits import ConcurrencyLimiter, MemoryConcurrencyLimiter, MemoryRateLimiter, RateLimiter
+from chat_service.engine.prompting import PromptContext, build_messages, load_prompt
 from chat_service.engine.store import ConversationStore, OrgSettingsStore
 from chat_service.llm.client import ModelClient, ModelError, StreamEnd, TextDelta
 from chat_service.principal import Principal
@@ -38,11 +38,6 @@ if TYPE_CHECKING:
 
 REFUSAL_SENTENCE = "I can only help with media campaigns and AgencyOS."
 log = logging.getLogger("chat_service.engine")
-_PROMPTS = Path(__file__).with_name("prompts")
-
-
-def load_prompt(version: str) -> str:
-    return (_PROMPTS / f"{version}.txt").read_text()
 
 
 def event(name: str, **data: Any) -> dict[str, Any]:
@@ -65,6 +60,7 @@ class _Turn:
     steps: int = 0
     host_prompt: int = 0
     host_completion: int = 0
+    host_cached: int = 0
     finished: bool = False
     prompt_version: str = "system_v1"
     writes_enabled: bool = False
@@ -184,17 +180,11 @@ class ChatEngine:
         local = self.clock().astimezone(tz)
         return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
-    def _system_prompt(self, principal: Principal, org, version: str) -> str:
+    def _messages(self, principal: Principal, org, version: str, history, text: str) -> list[dict[str, Any]]:
         if version not in self._templates:
             self._templates[version] = load_prompt(version)
-        today = self.clock().astimezone(ZoneInfo(org.timezone)).date().isoformat()
-        return self._templates[version].format(
-            today_date=today,
-            org_timezone=org.timezone,
-            org_currency=org.currency,
-            user_display_name=principal.display_name,
-            user_role=principal.primary_role,
-        )
+        ctx = PromptContext.at(self.clock(), org.timezone, org.currency, principal.primary_role, principal.display_name)
+        return build_messages(self._templates[version], ctx, history, text)
 
     def _usage(self, turn: _Turn) -> UsageRecord:
         return UsageRecord(
@@ -205,6 +195,7 @@ class ChatEngine:
             billing_tokenizer_version=self.tokenizer.version,
             host_prompt_tokens=turn.host_prompt,
             host_completion_tokens=turn.host_completion,
+            host_cached_prompt_tokens=turn.host_cached,
             serving_host=getattr(turn.model, "last_serving_host", "primary"),
             steps=turn.steps,
             workspace_id=turn.workspace_id,
@@ -297,11 +288,7 @@ class ChatEngine:
         try:
             history = await self.conversations.history(conversation_id, s.history_turns)
             await self.conversations.add_message(conversation_id, "user", text)
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": self._system_prompt(principal, org, turn.prompt_version)},
-                *history,
-                {"role": "user", "content": text},
-            ]
+            messages = self._messages(principal, org, turn.prompt_version, history, text)
             for step in range(1, s.max_steps + 1):
                 turn.steps = step
                 is_last = step == s.max_steps
@@ -328,6 +315,7 @@ class ChatEngine:
                     raise ModelError("model stream ended without a final event", before_first_token=False)
                 turn.host_prompt += end.prompt_tokens or 0
                 turn.host_completion += end.completion_tokens or 0
+                turn.host_cached += end.cached_prompt_tokens or 0
                 if not end.tool_calls or is_last:
                     break
                 messages.append(
@@ -479,6 +467,7 @@ class ChatEngine:
             "tokens_charged": charged,
             "host_prompt_tokens": turn.host_prompt,
             "host_completion_tokens": turn.host_completion,
+            "host_cached_prompt_tokens": turn.host_cached,
             "ttft_ms": turn.ttft_ms,
             "latency_ms": int((time.monotonic() - turn.started) * 1000),
             "billing_mode": mode,
@@ -495,6 +484,7 @@ class ChatEngine:
         metrics.BILLABLE_TOKENS.labels(mode).inc(charged)
         metrics.HOST_TOKENS.labels("prompt", model_name).inc(turn.host_prompt)
         metrics.HOST_TOKENS.labels("completion", model_name).inc(turn.host_completion)
+        metrics.HOST_CACHED_TOKENS.labels(model_name).inc(turn.host_cached)
         if record["ungrounded_numbers"]:
             metrics.UNGROUNDED.inc()
         if status != "ok":

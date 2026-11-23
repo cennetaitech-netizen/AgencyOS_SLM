@@ -25,13 +25,13 @@ from dataclasses import dataclass, field
 from itertools import groupby
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from chat_service.crypto import FieldCipher
 from chat_service.db.schema import chat_conversations, chat_feedback, chat_messages, chat_org_settings, chat_tool_calls
+from chat_service.engine.prompting import PromptContext, build_messages
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE = re.compile(r"(?<!\w)(?:\+\d{1,3}[\s-]?)?(?:\d[\s-]?){9,12}\d(?!\w)")
@@ -84,15 +84,13 @@ def is_validation(record: dict[str, Any], fraction: float = 0.05) -> bool:
     return int(_hash(key)[:8], 16) % 10_000 < fraction * 10_000
 
 
-def fill_system_prompt(template: str, created_at, timezone: str, currency: str) -> str:
-    """Rebuild the context block as the model saw it: the message's own date in the org's timezone."""
-    return template.format(
-        today_date=created_at.astimezone(ZoneInfo(timezone)).date().isoformat(),
-        org_timezone=timezone,
-        org_currency=currency,
-        user_display_name="User",
-        user_role="member",
-    )
+def prompt_prefix(
+    template: str, created_at, timezone: str, currency: str, history: list[dict[str, Any]], user_text: str
+) -> list[dict[str, Any]]:
+    """System prompt, history and the user's message laid out exactly as the engine sends them
+    (engine/prompting.py), with the context as of the message's own date in the org's timezone."""
+    ctx = PromptContext.at(created_at, timezone, currency, role="member")
+    return build_messages(template, ctx, history, user_text)
 
 
 async def export_records(
@@ -210,10 +208,12 @@ async def export_records(
                         report.drop("duplicate")
                         keep = False
                     seen.add(key)
-                system_prompt = fill_system_prompt(system_template, msg.created_at, conv.timezone, conv.currency)
+                prefix = prompt_prefix(
+                    system_template, msg.created_at, conv.timezone, conv.currency, history, user_text
+                )
                 if keep:
                     record = {
-                        "messages": _scrub_obj([{"role": "system", "content": system_prompt}, *history, *good_answer]),
+                        "messages": _scrub_obj([*prefix, *good_answer[1:]]),
                         "tools": tools,
                         "meta": {
                             "source": "correction" if corrected else source,
@@ -227,7 +227,7 @@ async def export_records(
                     if corrected and corrected != msg.content:
                         pairs.append(
                             {
-                                "prompt": _scrub_obj([{"role": "system", "content": system_prompt}, *history, *turn]),
+                                "prompt": _scrub_obj([*prefix, *turn[1:]]),
                                 "chosen": scrub(corrected),
                                 "rejected": scrub(msg.content),
                                 "tools": tools,

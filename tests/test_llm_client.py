@@ -33,7 +33,14 @@ async def test_text_stream_and_usage():
                 [
                     {"choices": [{"delta": {"content": "Hello"}}]},
                     {"choices": [{"delta": {"content": " world"}, "finish_reason": "stop"}]},
-                    {"choices": [], "usage": {"prompt_tokens": 120, "completion_tokens": 2}},
+                    {
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 120,
+                            "completion_tokens": 2,
+                            "prompt_tokens_details": {"cached_tokens": 96},
+                        },
+                    },
                 ]
             ),
         )
@@ -42,7 +49,7 @@ async def test_text_stream_and_usage():
     assert [e.text for e in events if isinstance(e, TextDelta)] == ["Hello", " world"]
     end = events[-1]
     assert isinstance(end, StreamEnd) and end.finish_reason == "stop"
-    assert (end.prompt_tokens, end.completion_tokens) == (120, 2)
+    assert (end.prompt_tokens, end.completion_tokens, end.cached_prompt_tokens) == (120, 2, 96)
     assert seen["body"]["stream"] is True and seen["body"]["stream_options"] == {"include_usage": True}
     assert seen["auth"] == "Bearer secret" and "tools" not in seen["body"]
 

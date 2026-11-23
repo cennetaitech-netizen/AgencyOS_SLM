@@ -124,6 +124,7 @@ chat_usage_events = Table(
     Column("billing_tokenizer_version", String(64), nullable=False),
     Column("host_prompt_tokens", Integer, nullable=True),
     Column("host_completion_tokens", Integer, nullable=True),
+    Column("host_cached_prompt_tokens", Integer, nullable=True),  # subset of host_prompt_tokens (prefix cache hits)
     Column("model_name", String(128), nullable=False),
     Column("serving_host", String(16), nullable=False, server_default="primary"),
     Column("prompt_version", String(64), nullable=False),

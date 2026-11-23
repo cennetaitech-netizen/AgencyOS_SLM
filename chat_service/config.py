@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     max_turns_per_conversation: int = 40
     tool_timeout_seconds: float = 15.0
     tool_result_max_chars: int = 8000
-    prompt_version: str = "system_v1"
+    prompt_version: str = "system_v3"  # static, cache-friendly (see engine/prompting.py); v1 still works
 
     # Wallet / billing
     reservation_ttl_seconds: int = 300
@@ -85,8 +85,11 @@ class Settings(BaseSettings):
     # Unit economics & quality (Phase 7) — prices in minor units per 1M tokens (finance input)
     host_price_input_per_1m_minor: int = 0
     host_price_output_per_1m_minor: int = 0
+    # Prompt tokens served from the host's prefix cache. Managed hosts discount them; on our own vLLM they skip
+    # prefill, so finance can set the GPU-time equivalent. Unset = charged like other input tokens (conservative).
+    host_price_cached_input_per_1m_minor: int | None = None
     list_price_per_1m_tokens_minor: int = 0
-    max_overhead_ratio: float = 20.0
+    max_overhead_ratio: float = 20.0  # compared with the uncached ratio: cached prompt tokens cost little
     min_gross_margin_pct: float = 70.0
 
     # Model rollout (Phase 11)
@@ -98,7 +101,7 @@ class Settings(BaseSettings):
     action_expiry_minutes: int = 10
     undo_window_hours: int = 24
     approver_role: str = "org_admin"
-    prompt_version_actions: str = "system_v2"
+    prompt_version_actions: str = "system_v3_actions"
 
     # Production hardening (Phase 12)
     cors_allowed_origins: list[str] = Field(default_factory=list)  # e.g. ["https://app.agencyos.example"]

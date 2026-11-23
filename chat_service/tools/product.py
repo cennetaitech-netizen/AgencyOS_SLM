@@ -321,7 +321,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="list_clients",
             label="Looking up clients",
             group="planning",
-            description="List the clients/brands this user can access, with their IDs.",
+            description="Clients this user can access, with IDs.",
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=handler("list_clients"),
         ),
@@ -329,7 +329,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="list_campaigns",
             label="Looking up campaigns",
             group="planning",
-            description="List campaigns (ID, name, platform, status, budget, flight dates), optionally for one client.",
+            description="Campaigns: ID, name, platform, status, budget, flight dates.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -345,8 +345,8 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             label="Looking up campaign performance",
             group="reporting",
             description=(
-                "Performance for one campaign or all campaigns of a client over a date range: spend, "
-                "impressions, clicks, conversions, revenue, CTR, CPC, CPM, CPA, ROAS. Optional breakdown."
+                "Spend, impressions, clicks, conversions, revenue, CTR, CPC, CPM, CPA, ROAS for a campaign "
+                "or a client's campaigns over a date range."
             ),
             parameters={
                 "type": "object",
@@ -366,8 +366,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="get_budget_pacing",
             label="Checking budget pacing",
             group="budgets",
-            description="Budget, spend to date, days elapsed and total flight days for a campaign. "
-            "Use media_math pacing_projection on the result to project end-of-flight spend.",
+            description="Budget, spend to date, days elapsed, total days (project with media_math pacing_projection).",
             parameters={
                 "type": "object",
                 "properties": {"campaign_id": {"type": "string"}},
@@ -380,7 +379,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="get_campaign_details",
             label="Looking up the campaign",
             group="planning",
-            description="Current settings of one campaign: name, platform, status, budget, flight dates.",
+            description="Current name, platform, status, budget and flight dates of a campaign.",
             parameters={
                 "type": "object",
                 "properties": {"campaign_id": {"type": "string"}},
@@ -393,7 +392,7 @@ def product_tools(api: ProductAPI) -> list[Tool]:
             name="search_help_docs",
             label="Searching help articles",
             group="help",
-            description="Search AgencyOS help articles for how-to questions about using the product.",
+            description="Search AgencyOS help articles (how-to questions).",
             parameters={
                 "type": "object",
                 "properties": {"query": {"type": "string", "minLength": 2}},

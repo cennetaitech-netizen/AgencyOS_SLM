@@ -16,6 +16,7 @@ class FakeTurn:
     tool_calls: list[tuple[str, dict[str, Any] | str]] = field(default_factory=list)
     fail_before_first_token: bool = False
     fail_after_text: bool = False
+    cached_prompt_tokens: int | None = None  # what the host reports as served from its prefix cache
 
 
 class FakeModelClient:
@@ -48,4 +49,5 @@ class FakeModelClient:
             tool_calls=calls,
             prompt_tokens=prompt_chars // 4,
             completion_tokens=max(1, len(turn.text) // 4) + 10 * len(calls),
+            cached_prompt_tokens=turn.cached_prompt_tokens,
         )

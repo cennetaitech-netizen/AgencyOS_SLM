@@ -100,6 +100,7 @@ class UsageRecord:
     billing_tokenizer_version: str
     host_prompt_tokens: int | None = None
     host_completion_tokens: int | None = None
+    host_cached_prompt_tokens: int | None = None
     serving_host: str = "primary"
     steps: int = 0
     workspace_id: uuid.UUID | None = None
@@ -528,6 +529,7 @@ class WalletService:
             billing_tokenizer_version=usage.billing_tokenizer_version,
             host_prompt_tokens=usage.host_prompt_tokens,
             host_completion_tokens=usage.host_completion_tokens,
+            host_cached_prompt_tokens=usage.host_cached_prompt_tokens,
             model_name=usage.model_name,
             serving_host=usage.serving_host,
             prompt_version=usage.prompt_version,

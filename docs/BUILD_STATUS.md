@@ -1,6 +1,6 @@
 # Build Status (Combined Release)
 
-Last updated: 2026-11-22 · Backend tests: **167 passing** (Postgres 16 + Redis) · Widget tests: **19 passing** · Migrations: 0001–0004
+Last updated: 2026-11-22 · Backend tests: **175 passing** (Postgres 16 + Redis) · Widget tests: **19 passing** · Migrations: 0001–0005
 
 ## Done
 | Area | Phase | What exists | Tests |
@@ -18,7 +18,8 @@ Last updated: 2026-11-22 · Backend tests: **167 passing** (Postgres 16 + Redis)
 | **Own SLM** | **11** | Dataset builder (consent, scrub, corrections, eval exclusion, DPO pairs), synthetic generator, short fine-tune prompt, LoRA SFT + DPO scripts (CPU smoke-tested with a tiny model), release gate, canary rollout with automatic rollback, runbook, model card | 13 + training smoke run |
 | CI | 7 | Lint, format, migrations, backend tests, widget typecheck/tests/build; model eval on relevant PRs; dependency and secret scans | — |
 | **Launch hardening** | **12** | Production start-up guard, security headers/CORS/size limit, audit log, encryption at rest with key rotation, Redis-shared limits, metrics + readiness + 9 SLO alerts, cross-tenant security suite, load test at 3× and failure drill (money checks pass), Dockerfile + compose, runbooks. See [LAUNCH_READINESS.md](LAUNCH_READINESS.md) | 16 + load/drill runs |
-| **Monitoring** | **12** | Grafana dashboard (20 panels in 5 sections: SLO headline, traffic and latency, tokens and margin, tools and actions, resilience, firing alerts), Prometheus config, provisioning, compose `monitoring` profile, query checker. Every query verified against live data | 4 (metric/label drift, generator, action outcome counts) + live run |
+| **Prefix caching & prompt v3** | **12** | Cache-friendly prompt layout (static `system_v3` prompts and tool schemas, `[Context]` line on the latest message) shared by engine, evals and training export; prefix 22–24% shorter; cached tokens tracked, priced and alerted on; host setup in `ops/MODEL_HOST.md`. Uncached overhead about 26× → about 3× (simulated and load-tested) | 9 + A/B, simulation and live run |
+| **Monitoring** | **12** | Grafana dashboard (21 panels in 5 sections: SLO headline, traffic and latency, tokens and margin, tools and actions, resilience, firing alerts), Prometheus config, provisioning, compose `monitoring` profile, query checker. Every query verified against live data | 4 (metric/label drift, generator, action outcome counts) + live run |
 
 ## Blocked on inputs
 | Needed | Unblocks |

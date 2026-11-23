@@ -64,13 +64,26 @@ groups:
           summary: "More than 5% of answers contain figures not found in tool data"
           runbook: "LAUNCH_READINESS.md#rb-quality"
 
+      # Uncached = tokens the model host had to compute. Prompt tokens served from its prefix cache cost little.
       - alert: AosOverheadRatioHigh
         expr: |
-          sum(rate(aos_chat_host_tokens_total[1h])) / sum(rate(aos_chat_billable_tokens_total[1h])) > 20
+          (sum(rate(aos_chat_host_tokens_total[1h])) - sum(rate(aos_chat_host_cached_prompt_tokens_total[1h])))
+            / sum(rate(aos_chat_billable_tokens_total[1h])) > 20
         for: 1h
         labels: {severity: ticket}
         annotations:
-          summary: "Hidden cost per message is above 20x billable tokens (margin at risk)"
+          summary: "Uncached model-host tokens are above 20x billable tokens (margin at risk)"
+          runbook: "LAUNCH_READINESS.md#rb-margin"
+
+      - alert: AosPromptCacheHitLow
+        expr: |
+          sum(rate(aos_chat_host_cached_prompt_tokens_total[1h]))
+            / sum(rate(aos_chat_host_tokens_total{kind="prompt"}[1h])) < 0.5
+          and sum(rate(aos_chat_messages_total[1h])) > 0.05
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Less than half of prompt tokens come from the model host's prefix cache (cost per message up)"
           runbook: "LAUNCH_READINESS.md#rb-margin"
 
       - alert: AosInstanceDown

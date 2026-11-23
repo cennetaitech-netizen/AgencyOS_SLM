@@ -32,7 +32,7 @@ async def test_correct_tool_and_args_scored():
     r = await run_case(model, case("m03"), META)
     assert r.tool_correct and r.args_valid and r.args_match
     assert r.host_tokens > 0 and r.billable_tokens > 0
-    assert "Today: 2026-11-22 (Asia/Kolkata)" in model.requests[0]["messages"][0]["content"]
+    assert model.requests[0]["messages"][1]["content"].startswith("[Context] Today: 2026-11-22 (Asia/Kolkata)")
 
 
 async def test_wrong_relative_date_fails_args_match():

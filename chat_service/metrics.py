@@ -24,6 +24,11 @@ MESSAGE_LATENCY = Histogram("aos_chat_message_seconds", "Full reply time", bucke
 TTFT = Histogram("aos_chat_time_to_first_token_seconds", "Time to first visible token", buckets=_LATENCY_BUCKETS)
 BILLABLE_TOKENS = Counter("aos_chat_billable_tokens_total", "Billable tokens (charged or shadow)", ["billing_mode"])
 HOST_TOKENS = Counter("aos_chat_host_tokens_total", "Tokens processed by the model host", ["kind", "model"])
+HOST_CACHED_TOKENS = Counter(
+    "aos_chat_host_cached_prompt_tokens_total",
+    "Prompt tokens served from the model host's prefix cache (included in host prompt tokens)",
+    ["model"],
+)
 TOOL_CALLS = Counter("aos_chat_tool_calls_total", "Tool calls", ["tool", "ok"])
 ACTIONS = Counter("aos_chat_actions_total", "Chat action outcomes", ["tool", "outcome"])
 UNGROUNDED = Counter("aos_chat_ungrounded_answers_total", "Answers flagged by the numeric grounding check")

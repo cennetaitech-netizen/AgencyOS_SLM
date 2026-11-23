@@ -127,10 +127,7 @@ MEDIA_MATH = Tool(
     name="media_math",
     label="Calculating",
     group="builtin",
-    description=(
-        "Exact calculator for media math. Use it for EVERY calculation: sums, budget splits by percent, "
-        "percent change, CPM/CPC/CPA/CTR/ROAS, impressions or clicks from a budget, and pacing projections."
-    ),
+    description=("Exact calculator. Use it for EVERY calculation."),
     parameters={
         "type": "object",
         "properties": {
@@ -138,7 +135,7 @@ MEDIA_MATH = Tool(
             "values": {
                 "type": "object",
                 "description": (
-                    "Inputs by name. sum: values[]; percent_split: total, shares{name: percent}; "
+                    "sum: values[]; percent_split: total, shares{name: percent}; "
                     "percent_change: old, new; impressions_from_cpm: budget, cpm; cpm: spend, impressions; "
                     "clicks_from_cpc: budget, cpc; cpc: spend, clicks; ctr: clicks, impressions; "
                     "cpa: spend, conversions; conversions_from_cpa: budget, cpa; roas: revenue, spend; "

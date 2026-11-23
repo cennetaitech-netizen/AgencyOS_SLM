@@ -12,7 +12,7 @@ Status as of 2026-11-22. ✅ = done and verified · 🟡 = built, needs a real e
 | Encryption at rest for stored tool results (client campaign data), with key rotation | ✅ | `chat_service/crypto.py`; tests: data unreadable in the DB, rotation, old key retired |
 | Shared rate and concurrency limits across instances (Redis), fail-open if Redis is down | ✅ | `chat_service/engine/limits.py`; tests with real Redis and two simulated servers |
 | Metrics (`/metrics`, token-protected), readiness (`/readyz`), liveness (`/healthz`) | ✅ | `chat_service/metrics.py`, tests |
-| SLO alert rules | ✅ | `ops/prometheus/alerts.yml` (9 rules, every metric name checked against the code) |
+| SLO alert rules | ✅ | `ops/prometheus/alerts.yml` (10 rules, every metric name checked against the code) |
 | Automated security tests: every route needs login, staff routes refuse org admins, admin routes refuse members, other orgs can't reach any record by ID | ✅ | `tests/test_security.py` (all 56 routes discovered automatically; 52 non-public routes checked for login, 18 staff routes checked against org admins) |
 | Dependency vulnerability scans (Python + widget) and secret scanning in CI | ✅ | `.github/workflows/security.yml`; today: **0 known vulnerabilities** in both |
 | Load test at 3× assumed pilot peak, 2 instances | ✅ | §3 |
@@ -33,15 +33,16 @@ Status as of 2026-11-22. ✅ = done and verified · 🟡 = built, needs a real e
 | p95 time to first token | < 1.5 s | `aos_chat_time_to_first_token_seconds` | `AosTimeToFirstTokenSlow` |
 | Confirmed actions failing | ≤ 3 per 30 min | `aos_chat_actions_total{outcome="failed"}` | `AosActionFailures` (page) |
 | Answers with unverifiable figures | < 5% | `aos_chat_ungrounded_answers_total` | `AosUngroundedAnswersHigh` |
-| Hidden cost per message (margin) | overhead ratio ≤ 20× | host ÷ billable tokens | `AosOverheadRatioHigh` |
+| Hidden cost per message (margin) | uncached overhead ratio ≤ 20× (about 3× expected) | (host − cached) ÷ billable tokens | `AosOverheadRatioHigh` |
+| Prompt cache working | cache hit ≥ 50% (about 90% expected) | `aos_chat_host_cached_prompt_tokens_total` ÷ host prompt tokens | `AosPromptCacheHitLow` |
 | Fallback model host in use | ~0 | `aos_model_fallback_total` | `AosModelFallbackActive` |
 | Redis (limits) reachable | always | `aos_limiter_fail_open_total` | `AosLimiterFailOpen` |
 
 ### Dashboard
-**AgencyOS Assistant** in Grafana (`ops/grafana/`): 20 panels in 5 sections, with an instance picker and a link to the runbooks.
+**AgencyOS Assistant** in Grafana (`ops/grafana/`): 21 panels in 5 sections, with an instance picker and a link to the runbooks.
 - **Launch SLOs:** availability, failed replies, p95 first token, unverified figures, hidden cost ratio, instances up. Each turns red at its alert threshold.
 - **Chat traffic and latency:** messages/s by outcome · first token and full reply p50/p95 with the 1.5 s SLO line · errors shown to users by code · HTTP 5xx by route · p95 API time by route.
-- **Tokens and margin:** billable vs model-host tokens · hidden cost ratio with the 20× line · host tokens by model (canary split).
+- **Tokens and margin:** billable vs model-host tokens (cached part shown) · hidden cost ratio, all and uncached, with the 20× line · prompt cache hit rate · host tokens by model (canary split).
 - **Tools and chat actions:** calls by tool · failure rate by tool · actions by outcome (proposed, executed, cancelled, rejected, rejected_by_approver, expired, failed).
 - **Resilience:** fallback host use · requests let through while Redis was down · firing alerts.
 
@@ -64,18 +65,18 @@ Setup:
   - The users the load-test bots simulate send messages with no pause, so the rate limit refused 7,025 of their 16,165 messages, as designed.
   - Failed replies were 1.7% of the rest, under the 2% SLO, and were never charged: the money checks show 8,985 charged messages = 8,985 successes, 640,181 tokens charged = 640,181 debited, and no reservations left.
 
-![AgencyOS Assistant dashboard during the verification run](images/grafana-dashboard.png)
+![AgencyOS Assistant dashboard (load test with prefix caching, 2026-11-23)](images/grafana-dashboard.png)
 
-**Finding: hidden cost ratio about 26×, above the 20× alert line.**
-- Each answered message made the model host process about **1,830 tokens** (1,780 prompt, 49 completion) for **71 billable tokens**. The fixed part, system prompt plus tool schemas, is sent on every model call, and twice when a tool is used. So short questions carry a large overhead.
-- The stand-in host estimates tool schemas at a flat 600 tokens, so re-measure with the real model and tokenizer (bake-off overhead ratio, `/chat/admin/economics`) before deciding.
-- Options, for the pricing decision (D1/D3):
-  - turn on prefix caching on the model host (e.g. vLLM `--enable-prefix-caching`), so the repeated prefix costs far less GPU time
-  - shorten the system prompt and tool descriptions
-  - price billable tokens to cover the measured ratio
-  - raise the alert threshold once the real ratio is known
-
-Leave the alert at 20× until then.
+**Finding: hidden cost ratio about 26×, above the 20× alert line. Fixed 2026-11-23** (details in [ops/MODEL_HOST.md](../ops/MODEL_HOST.md)).
+- **Cause:** each answered message made the model host compute about 1,830 tokens for 71 billable ones. The system prompt and tool schemas are resent on every model call, and the old prompt put the date, user name and role at the top, so no two users shared a cacheable prefix.
+- **Fix:**
+  1. **Prefix caching** on the model host (vLLM `--enable-prefix-caching --enable-prompt-tokens-details`, or a managed host's prompt caching).
+  2. **Cache-friendly prompt** (`system_v3`): a static system prompt and tool schemas, with the context moved to a `[Context]` line on the latest message.
+  3. **Shorter prefix**, measured with a Qwen tokenizer: read-only 1,634 → **1,282 tokens** (−22%), with actions 2,156 → **1,649** (−24%). Tool schemas no longer carry validation-only keywords, which the server still enforces.
+  4. **Cached tokens tracked**: stored per message (migration 0005), exported as `aos_chat_host_cached_prompt_tokens_total`, priced separately (`CHAT_HOST_PRICE_CACHED_INPUT_PER_1M_MINOR`).
+  5. **Margin alert** now follows the **uncached** ratio, plus a new `AosPromptCacheHitLow` alert. The dashboard shows the cache hit rate.
+- **Result:** uncached host tokens per billable token went from about **26× to about 3×**. Simulation of a 2,000-user day: 2.8–3.0×, cache hit about 91%. Load test: 2.3×, hit 94%. With caching but the old layout it would have been 7–8×.
+- **Still to do:** re-measure with the real model host and tokenizer in staging. The 20× alert stays as the safety line on the uncached ratio.
 
 ## 3. Load test and failure drill (2026-11-22, this environment)
 
@@ -105,7 +106,13 @@ Setup: 2 API instances sharing Postgres 16 and Redis; stand-in model host (`ops/
 
 <a id="rb-quality"></a>**Unverifiable figures rising.** Open `GET /chat/admin/quality-review`, check the flagged answers' tool data, and compare by model and prompt version. Roll back a canary or prompt change if one is involved. Add failing cases to `evals/chat_eval_cases.json`.
 
-<a id="rb-margin"></a>**Overhead ratio too high.** Check `GET /chat/admin/economics` by org (long conversations, heavy tool results). Levers: lower `CHAT_TOOL_RESULT_MAX_CHARS` or `CHAT_HISTORY_TURNS`, prompt caching on the host, shorter prompt or fine-tuned model (Phase 11).
+<a id="rb-margin"></a>**Overhead ratio too high, or prompt cache hit low.**
+1. Check the "Prompt cache hit rate" panel. If it dropped:
+   - Is caching on and reported (`--enable-prefix-caching --enable-prompt-tokens-details`)?
+   - Did a deploy change the prompt or tools so it varies per user? `tests/test_prompt_cache.py` should have caught that.
+   - Did replicas scale out without prefix-aware routing?
+2. If the hit rate is fine, check `GET /chat/admin/economics` by org (long conversations, heavy tool results).
+3. Levers: lower `CHAT_TOOL_RESULT_MAX_CHARS` or `CHAT_HISTORY_TURNS`, a shorter prompt, or the fine-tuned model with `system_ft_v2` (Phase 11). See [ops/MODEL_HOST.md](../ops/MODEL_HOST.md).
 
 **Other routine operations** (also in `docs/business/SUPPORT_PILOT_LAUNCH_KIT.md`): goodwill credit, disabling chat for one org, pinning an org to a model, invoice approval, key rotation (`python -m chat_service.crypto rotate`).
 
@@ -126,7 +133,7 @@ Setup: 2 API instances sharing Postgres 16 and Redis; stand-in model host (`ops/
 - **Data at rest:** encrypted tool results; key handling.
 
 ## 6. Deployment topology (recommended)
-Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply, no response buffering on the stream route) → **2+ API containers** (4 workers each) → Postgres (managed, point-in-time recovery, daily backup restore test) · Redis (managed or container, **no persistence**) · 1 **jobs** container (`python -m chat_service.jobs`, single replica) · model host (managed or vLLM) + fallback host · Prometheus + alerting. Secrets (DB URL, model and payment keys, webhook secret, encryption keys, metrics token) come from the secrets manager.
+Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply, no response buffering on the stream route) → **2+ API containers** (4 workers each) → Postgres (managed, point-in-time recovery, daily backup restore test) · Redis (managed or container, **no persistence**) · 1 **jobs** container (`python -m chat_service.jobs`, single replica) · model host (managed or vLLM, **prefix caching on**, see `ops/MODEL_HOST.md`) + fallback host · Prometheus + alerting. Secrets (DB URL, model and payment keys, webhook secret, encryption keys, metrics token) come from the secrets manager.
 
 ## 7. What still needs people before launch
 1. Payment provider and invoicing route (D9): the last item blocking production start-up.

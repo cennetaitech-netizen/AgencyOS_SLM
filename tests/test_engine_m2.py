@@ -85,12 +85,12 @@ async def test_write_call_becomes_a_card_and_changes_nothing(stack, principal):
     assert len(proposed) == 1 and proposed[0]["data"]["after"]["budget"] == 330000
     assert stack["product"].campaigns[0]["budget"] == 300000  # nothing executed by the model
     assert "update_campaign_budget" in tool_names(model.requests[0]["tools"])
-    assert "PROPOSE changes" in model.requests[0]["messages"][0]["content"]  # system_v2
+    assert "action tools only PROPOSE" in model.requests[0]["messages"][0]["content"]  # system_v3_actions
     tool_reply = model.requests[2]["messages"][-1]["content"]
     assert '"awaiting_user_confirmation"' in tool_reply
     async with chat.wallet.engine.connect() as conn:
         ev = (await conn.execute(select(chat_usage_events))).one()
-    assert ev.prompt_version == "system_v2" and ev.client_id == "cl_acme"
+    assert ev.prompt_version == "system_v3_actions" and ev.client_id == "cl_acme"
 
     view = await stack["actions"].confirm(principal, uuid.UUID(proposed[0]["data"]["action_id"]))
     assert view["status"] == "executed" and stack["product"].campaigns[0]["budget"] == 330000

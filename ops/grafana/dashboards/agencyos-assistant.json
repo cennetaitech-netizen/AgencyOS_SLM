@@ -365,8 +365,8 @@
     },
     {
       "type": "stat",
-      "title": "Hidden cost ratio (1 h)",
-      "description": "Model-host tokens per billable token (system prompt, tool schemas, tool results). Above 20× the margin is at risk. Alert: AosOverheadRatioHigh.",
+      "title": "Uncached cost ratio (1 h)",
+      "description": "Model-host tokens the host had to compute (not served from its prefix cache) per billable token. Above 20× the margin is at risk. Alert: AosOverheadRatioHigh.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -377,7 +377,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(aos_chat_host_tokens_total{instance=~\"$instance\"}[1h])) / sum(rate(aos_chat_billable_tokens_total{instance=~\"$instance\"}[1h]))",
+          "expr": "(sum(rate(aos_chat_host_tokens_total{instance=~\"$instance\"}[1h])) - sum(rate(aos_chat_host_cached_prompt_tokens_total{instance=~\"$instance\"}[1h]))) / sum(rate(aos_chat_billable_tokens_total{instance=~\"$instance\"}[1h]))",
           "legendFormat": "__auto",
           "refId": "A",
           "range": true
@@ -938,8 +938,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Billable tokens vs model-host tokens (per second)",
-      "description": "Billable = what clients pay for (or would, in shadow mode). Host = what the model actually processed, which drives GPU cost.",
+      "title": "Billable vs model-host tokens per second",
+      "description": "Billable = what clients pay for (or would, in shadow mode). Host = what the model processed; 'host prompt (cached)' is the part served from its prefix cache.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -963,6 +963,16 @@
           "expr": "sum by (kind) (rate(aos_chat_host_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "host {{kind}}",
           "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(aos_chat_host_cached_prompt_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "host prompt (cached)",
+          "refId": "C",
           "range": true
         }
       ],
@@ -1007,7 +1017,7 @@
       "id": 15,
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 0,
         "y": 23
       }
@@ -1015,7 +1025,7 @@
     {
       "type": "timeseries",
       "title": "Hidden cost ratio",
-      "description": "Dashed line: 20×, the margin alert. Rising means prompts or tool results grew (runbook rb-margin).",
+      "description": "Host tokens per billable token. Dashed line: 20×, the margin alert on the uncached ratio. Rising means prompts or tool results grew, or the prefix cache stopped hitting (runbook rb-margin).",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1027,8 +1037,18 @@
             "uid": "${datasource}"
           },
           "expr": "sum(rate(aos_chat_host_tokens_total{instance=~\"$instance\"}[$__rate_interval])) / sum(rate(aos_chat_billable_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
-          "legendFormat": "host ÷ billable",
+          "legendFormat": "all host tokens",
           "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum(rate(aos_chat_host_tokens_total{instance=~\"$instance\"}[$__rate_interval])) - sum(rate(aos_chat_host_cached_prompt_tokens_total{instance=~\"$instance\"}[$__rate_interval]))) / sum(rate(aos_chat_billable_tokens_total{instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "uncached (drives cost)",
+          "refId": "B",
           "range": true
         }
       ],
@@ -1078,6 +1098,74 @@
         }
       },
       "id": 16,
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 23
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt cache hit rate",
+      "description": "Share of prompt tokens served from the model host's prefix cache. Expect most of it: the system prompt and tool schemas are identical for everyone. A drop means caching is off, a prompt change broke the shared prefix, or traffic isn't routed to warm replicas. Alert below 50%: AosPromptCacheHitLow.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(aos_chat_host_cached_prompt_tokens_total{instance=~\"$instance\"}[$__rate_interval])) / sum(rate(aos_chat_host_tokens_total{kind=\"prompt\",instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "cached ÷ prompt tokens",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMax": 1
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "Host doesn't report cache hits"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 17,
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1143,7 +1231,7 @@
           "sort": "desc"
         }
       },
-      "id": 17,
+      "id": 18,
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1155,7 +1243,7 @@
       "type": "row",
       "title": "Tools and chat actions",
       "collapsed": false,
-      "id": 18,
+      "id": 19,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1222,7 +1310,7 @@
           "sort": "desc"
         }
       },
-      "id": 19,
+      "id": 20,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1289,7 +1377,7 @@
           "sort": "desc"
         }
       },
-      "id": 20,
+      "id": 21,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1462,7 +1550,7 @@
           "sort": "desc"
         }
       },
-      "id": 21,
+      "id": 22,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1474,7 +1562,7 @@
       "type": "row",
       "title": "Resilience",
       "collapsed": false,
-      "id": 22,
+      "id": 23,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1542,7 +1630,7 @@
           "sort": "desc"
         }
       },
-      "id": 23,
+      "id": 24,
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -1609,7 +1697,7 @@
           "sort": "desc"
         }
       },
-      "id": 24,
+      "id": 25,
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -1671,7 +1759,7 @@
         "showHeader": true,
         "cellHeight": "sm"
       },
-      "id": 25,
+      "id": 26,
       "gridPos": {
         "h": 7,
         "w": 8,

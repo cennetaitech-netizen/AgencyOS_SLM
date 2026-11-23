@@ -90,7 +90,7 @@ async def test_engine_flags_ungrounded_numbers_and_tracks_events(engine, setting
 # ---------------------------------------------------------------- economics & quality
 
 
-async def _usage(engine, org, model, billable, prompt, completion, when, status="charged", reason=None):
+async def _usage(engine, org, model, billable, prompt, completion, when, status="charged", reason=None, cached=None):
     async with engine.begin() as conn:
         await conn.execute(
             chat_usage_events.insert().values(
@@ -105,6 +105,7 @@ async def _usage(engine, org, model, billable, prompt, completion, when, status=
                 billing_tokenizer_version="v",
                 host_prompt_tokens=prompt,
                 host_completion_tokens=completion,
+                host_cached_prompt_tokens=cached,
                 model_name=model,
                 prompt_version="system_v1",
                 status=status,
@@ -131,6 +132,27 @@ async def test_unit_economics_overhead_margin_and_alerts(engine, settings, clock
     settings.min_gross_margin_pct = 80
     result = await unit_economics(engine, settings, clock.now - timedelta(days=2), clock.now + timedelta(days=1))
     assert "below the 80" in result["alerts"][0]
+
+
+async def test_cached_prompt_tokens_lower_cost_and_drive_the_overhead_alert(engine, settings, clock):
+    settings.host_price_input_per_1m_minor = 2_000
+    settings.host_price_output_per_1m_minor = 6_000
+    settings.list_price_per_1m_tokens_minor = 100_000
+    settings.max_overhead_ratio = 20
+    org = uuid.uuid4()
+    # 25x raw overhead, but 20,000 of the 24,000 prompt tokens came from the prefix cache
+    await _usage(engine, org, "m", 1_000, 24_000, 1_000, clock.now, cached=20_000)
+    window = (clock.now - timedelta(days=1), clock.now + timedelta(days=1))
+    result = await unit_economics(engine, settings, *window, org)
+    s = result["summary"]
+    assert s["overhead_ratio"] == 25.0 and s["uncached_overhead_ratio"] == 5.0 and s["cache_hit_pct"] == 83.3
+    assert s["host_cost_minor"] == int((24_000 * 2_000 + 1_000 * 6_000) / 1_000_000)  # no cached price set
+    assert not any("overhead" in a for a in result["alerts"])  # the alert follows the uncached ratio
+    settings.host_price_cached_input_per_1m_minor = 200  # e.g. a host that bills cache hits at 10%
+    s = (await unit_economics(engine, settings, *window, org))["summary"]
+    assert s["host_cost_minor"] == int((4_000 * 2_000 + 20_000 * 200 + 1_000 * 6_000) / 1_000_000)
+    settings.max_overhead_ratio = 4
+    assert "uncached overhead ratio 5.0" in (await unit_economics(engine, settings, *window, org))["alerts"][0]
 
 
 async def test_quality_review_lists_down_rated_and_flagged(engine):

@@ -23,12 +23,35 @@ from collections import Counter
 
 import httpx
 
+# Traffic is varied the way real traffic is (different people, orgs, questions, follow-ups), so prompt-cache
+# measurements aren't flattered by identical prompts.
+CLIENTS = ["Acme Foods", "Brightline Telecom", "Nova Motors", "Kiran Jewellers", "Bluewave Travel", "Orchid Retail"]
+PERIODS = ["last 7 days", "last week", "this month", "1-15 Nov", "the last 30 days", "yesterday"]
+METRICS = ["CPA", "ROAS", "CTR", "spend", "conversions", "CPM"]
 QUESTIONS = [
-    "How are my active campaigns doing?",
-    "Which campaigns are active right now?",
-    "Give me a quick summary of last week",
-    "Any campaigns I should look at today?",
+    "How are my active campaigns doing for {client}?",
+    "Which {client} campaigns are active right now?",
+    "Give me a quick summary of {period} for {client}",
+    "Any {client} campaigns I should look at today?",
+    "What was the {metric} for {client} over {period}?",
+    "Is {client} pacing to spend its budget this month?",
+    "Compare {metric} across platforms for {client}, {period}",
 ]
+FOLLOW_UPS = [
+    "And how does that compare with the previous period?",
+    "Break that down by platform please",
+    "Which campaign is the weakest on {metric}?",
+    "What would you change first?",
+    "Can you put that in a table?",
+]
+ORG_SETTINGS = [("Asia/Kolkata", "INR"), ("Europe/London", "GBP"), ("America/New_York", "USD"), ("Asia/Dubai", "AED")]
+NAMES = ["Priya Sharma", "Sam Taylor", "Arjun Mehta", "Lena Fischer", "Omar Haddad", "Mei Chen", "Rahul Iyer"]
+ROLES = ["planner", "analyst", "planner", "org_admin", "member"]
+
+
+def question(follow_up: bool) -> str:
+    template = random.choice(FOLLOW_UPS if follow_up else QUESTIONS)
+    return template.format(client=random.choice(CLIENTS), period=random.choice(PERIODS), metric=random.choice(METRICS))
 
 
 def pct(values: list[float], p: float) -> float | None:
@@ -48,17 +71,22 @@ class Stats:
 
 
 async def user_loop(client: httpx.AsyncClient, apis, headers: dict, stop_at: float, stats: Stats) -> None:
+    conv, turns_left = None, 0
     while time.monotonic() < stop_at:
         base = next(apis)
         try:
-            conv = (await client.post(f"{base}/chat/conversations", json={}, headers=headers)).json()["id"]
+            follow_up = turns_left > 0
+            if not follow_up:  # a new conversation of 1-4 messages
+                conv = (await client.post(f"{base}/chat/conversations", json={}, headers=headers)).json()["id"]
+                turns_left = random.randint(1, 4)
+            turns_left -= 1
             start = time.monotonic()
             first = None
             outcome = "no_end"
             async with client.stream(
                 "POST",
                 f"{base}/chat/conversations/{conv}/messages",
-                json={"text": random.choice(QUESTIONS)},
+                json={"text": question(follow_up)},
                 headers=headers,
             ) as resp:
                 if resp.status_code != 200:
@@ -107,12 +135,18 @@ async def main() -> None:
         for org in orgs:
             r = await client.put(
                 f"{args.api[0]}/chat/admin/orgs/{org}/settings",
-                json={"chat_enabled": True, "billing_mode": "live"},
+                json=dict(zip(("timezone", "currency"), random.choice(ORG_SETTINGS), strict=True))
+                | {"chat_enabled": True, "billing_mode": "live"},
                 headers=staff,
             )
             r.raise_for_status()
         users = [
-            {"X-Dev-User-Id": str(uuid.uuid4()), "X-Dev-Org-Id": str(org), "X-Dev-Roles": "planner"}
+            {
+                "X-Dev-User-Id": str(uuid.uuid4()),
+                "X-Dev-Org-Id": str(org),
+                "X-Dev-Roles": random.choice(ROLES),
+                "X-Dev-Name": random.choice(NAMES),
+            }
             for org in orgs
             for _ in range(args.users_per_org)
         ]

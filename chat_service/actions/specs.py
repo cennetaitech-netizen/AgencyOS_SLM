@@ -53,14 +53,13 @@ def _ended(before: dict[str, Any]) -> list[str]:
     return ["campaign has ended"] if before.get("status") == "ended" else []
 
 
-_CID = {"campaign_id": {"type": "string", "description": "Campaign ID from list_campaigns"}}
+_CID = {"campaign_id": {"type": "string"}}
 
 UPDATE_BUDGET = ActionSpec(
     name="update_campaign_budget",
     label="Change campaign budget",
     description=(
-        "PROPOSE a new total budget for a campaign. Nothing changes until the user confirms the card. "
-        "Get the current budget with get_campaign_details first; use media_math for any calculation."
+        "Propose a new total budget. First get the current one with get_campaign_details; calculate with media_math."
     ),
     parameters={
         "type": "object",
@@ -90,7 +89,7 @@ UPDATE_BUDGET = ActionSpec(
 PAUSE = ActionSpec(
     name="pause_campaign",
     label="Pause campaign",
-    description="PROPOSE pausing an active campaign. Nothing changes until the user confirms the card.",
+    description="Propose pausing an active campaign.",
     parameters={"type": "object", "properties": _CID, "required": ["campaign_id"], "additionalProperties": False},
     risk_tier=2,
     reversible=True,
@@ -105,7 +104,7 @@ PAUSE = ActionSpec(
 RESUME = ActionSpec(
     name="resume_campaign",
     label="Resume campaign",
-    description="PROPOSE resuming a paused campaign. Nothing changes until the user confirms the card.",
+    description="Propose resuming a paused campaign.",
     parameters={"type": "object", "properties": _CID, "required": ["campaign_id"], "additionalProperties": False},
     risk_tier=2,
     reversible=True,
@@ -120,7 +119,7 @@ RESUME = ActionSpec(
 RENAME = ActionSpec(
     name="rename_campaign",
     label="Rename campaign",
-    description="PROPOSE a new name for a campaign. Nothing changes until the user confirms the card.",
+    description="Propose a new campaign name.",
     parameters={
         "type": "object",
         "properties": {**_CID, "new_name": {"type": "string", "minLength": 3, "maxLength": 120}},

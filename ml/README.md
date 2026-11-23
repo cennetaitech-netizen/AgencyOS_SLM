@@ -33,7 +33,7 @@ python -m chat_service.ml.build --database-url "$PROD_READ_REPLICA_URL" --out ml
   - **eval questions are never included**
   - the split is deterministic
 - `ml/corrections.jsonl`: one `{"message_id": "...", "corrected_answer": "..."}` per line, written by the media SME from the weekly quality review (`GET /chat/admin/quality-review`).
-- Prompt: records use `system_ft_v1`, the short prompt (≥ 50% shorter than `system_v2`). The fine-tuned model learns the behaviour, so each message costs fewer hidden tokens.
+- Prompt: records use `system_ft_v2`, the short prompt (at most half the length of `system_v3_actions`), laid out exactly as the engine sends it: a static system prompt, then history, then the latest user message starting with a `[Context]` line. The fine-tuned model learns the behaviour, so each message costs fewer hidden tokens, and the fixed prefix stays cacheable. `system_ft_v1` (context in the system prompt) still builds for comparison.
 - **Version every snapshot** (`ml/data/v1`, `v2`, …) and keep it with the model it trained.
 
 ## 2. Train
@@ -53,8 +53,10 @@ Each run writes `training_meta.json` (config, dataset, stats, loss). Fill in a m
 
 ## 3. Serve the adapter next to production (vLLM)
 ```bash
-vllm serve <base-model> --enable-lora --lora-modules media-slm-v1=ml/runs/dpo-v1 --max-lora-rank 16
+vllm serve <base-model> --enable-prefix-caching --enable-prompt-tokens-details \
+  --enable-lora --lora-modules media-slm-v1=ml/runs/dpo-v1 --max-lora-rank 16
 ```
+Prefix caching and cached-token reporting: see [ops/MODEL_HOST.md](../ops/MODEL_HOST.md). Serve the fine-tuned model with `CHAT_PROMPT_VERSION=system_ft_v2` (and the same for `CHAT_PROMPT_VERSION_ACTIONS`) so it gets the prompt it was trained on.
 Then tell the chat service the new model name exists (same host, same base URL):
 ```bash
 CHAT_EXTRA_MODEL_NAMES='["media-slm-v1"]'

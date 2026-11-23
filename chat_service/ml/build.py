@@ -18,7 +18,7 @@ from pathlib import Path
 from chat_service.config import Settings
 from chat_service.crypto import FieldCipher
 from chat_service.db import create_engine
-from chat_service.engine.agent import load_prompt
+from chat_service.engine.prompting import load_prompt
 from chat_service.llm.client import OpenAICompatibleClient
 from chat_service.ml.dataset import export_records, load_corrections, write_jsonl, write_splits
 from chat_service.tools import build_registry
@@ -29,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--prompt-version", default="system_ft_v1")
+    parser.add_argument("--prompt-version", default="system_ft_v2")
     parser.add_argument("--corrections", type=Path)
     parser.add_argument("--eval-cases", default="evals/chat_eval_cases.json")
     parser.add_argument("--teacher", help="JSON model entry (bake-off format) for synthetic data")
