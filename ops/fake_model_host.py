@@ -92,6 +92,7 @@ app = Starlette(
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="127.0.0.1", help="0.0.0.0 inside a container")
     ap.add_argument("--port", type=int, default=8003)
     ap.add_argument("--ttft-ms", type=int, default=150)
     ap.add_argument("--chunks", type=int, default=20)
@@ -103,4 +104,4 @@ if __name__ == "__main__":
     ap.add_argument("--cache-tokens", type=int, default=800_000, help="prefix cache size in tokens")
     ARGS = ap.parse_args()
     CACHE = PrefixCache(ARGS.cache_tokens, enabled=not ARGS.no_prefix_cache)
-    uvicorn.run(app, host="127.0.0.1", port=ARGS.port, log_level="warning")
+    uvicorn.run(app, host=ARGS.host, port=ARGS.port, log_level="warning")

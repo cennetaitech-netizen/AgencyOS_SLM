@@ -13,11 +13,16 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]  # limit state is short-lived: never persist
   model:
     build: .
-    command: ["python", "ops/fake_model_host.py", "--port", "8003"]
+    command: ["python", "ops/fake_model_host.py", "--host", "0.0.0.0", "--port", "8003"]
     volumes: ["./ops:/app/ops:ro"]
+    healthcheck:  # the image's own check is for the API on 8090
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/stats', timeout=2)"]
+      interval: 5s
+      retries: 10
   migrate:
     build: .
     command: ["alembic", "upgrade", "head"]
+    healthcheck: {disable: true}
     environment: &env
       CHAT_ENV: dev
       CHAT_DATABASE_URL: postgresql+asyncpg://chat:chat@postgres:5432/chat
@@ -31,11 +36,15 @@ services:
     build: .
     environment: *env
     ports: ["8090:8090"]
-    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_started}}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_started}
+      model: {condition: service_healthy}
   jobs:
     build: .
     command: ["python", "-m", "chat_service.jobs"]
     environment: *env
+    healthcheck: {disable: true}  # no HTTP port; the image's check is for the API
     depends_on: {migrate: {condition: service_completed_successfully}}
   prometheus:
     image: prom/prometheus:v2.53.0

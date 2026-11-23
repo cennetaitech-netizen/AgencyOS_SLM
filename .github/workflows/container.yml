@@ -1,0 +1,70 @@
+name: container
+
+# Builds the image and runs the whole stack (docker compose --profile monitoring) to check that it starts and works
+# end to end: API, migrations, Redis, stand-in model host, jobs, Prometheus with the alert rules, Grafana with the
+# dashboard. Also checks that the image runs as a non-root user and refuses to start with an unsafe production config.
+
+on:
+  push:
+    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**",
+            "migrations/**", "ops/**", ".github/workflows/container.yml"]
+  pull_request:
+    paths: ["Dockerfile", "docker-compose.yml", ".dockerignore", "pyproject.toml", "chat_service/**",
+            "migrations/**", "ops/**", ".github/workflows/container.yml"]
+  workflow_dispatch:
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t agencyos-assistant:ci .
+
+      - name: Image runs as a non-root user
+        run: test "$(docker run --rm agencyos-assistant:ci id -u)" = "10001"
+
+      - name: Image refuses to start with an unsafe production config
+        run: |
+          set +e
+          out=$(timeout 60 docker run --rm agencyos-assistant:ci python -c \
+            "from chat_service.api.app import create_app; create_app()" 2>&1)
+          code=$?
+          set -e
+          echo "$out" | tail -15
+          test $code -ne 0 && echo "$out" | grep -q "unsafe production configuration"
+
+      - name: Start the stack with monitoring
+        run: docker compose --profile monitoring up -d --build
+
+      - name: Smoke test (API, chat stream, metrics, Prometheus, Grafana)
+        run: |
+          python3 ops/smoke_stack.py --api http://localhost:8090 --prometheus http://localhost:9090 \
+            --grafana http://localhost:3000 --metrics-token dev-metrics-token --timeout 240
+
+      - name: Jobs container is running
+        run: test "$(docker compose ps --status running --services | grep -c '^jobs$')" = "1"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile monitoring logs --no-color --tail 200
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose --profile monitoring down -v
+
+  image-scan:
+    runs-on: ubuntu-latest
+    needs: stack
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t agencyos-assistant:ci .
+      - name: Scan the image for known vulnerabilities (fixable critical ones fail the job)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: agencyos-assistant:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
