@@ -1,6 +1,6 @@
 # Model host: prefix caching
 
-Every model call resends the same opening: the system prompt and the tool schemas (about 1,340 tokens read-only, 1,710 with chat actions), then the conversation so far. Billable text is only the user's message and the visible answer, about 70–100 tokens. Without caching, the host computes the whole prompt every time, about 25× the billable tokens.
+Every model call resends the same opening: the system prompt and the tool schemas (about 1,355 tokens read-only, 1,730 with chat actions), then the conversation so far. Billable text is only the user's message and the visible answer, about 70–100 tokens. Without caching, the host computes the whole prompt every time, about 25× the billable tokens.
 
 **Prefix caching** lets the host reuse the work for any opening it has seen recently. The chat service lays prompts out for it (`chat_service/engine/prompting.py`):
 
@@ -11,7 +11,7 @@ Every model call resends the same opening: the system prompt and the tool schema
 
 `tests/test_prompt_cache.py` fails if anything personal or dated moves back into parts 1–3, or if the prefix grows past its budget.
 
-In step 4 the context goes in its own short system message by default. If your model's chat template accepts only one system message, set `CHAT_PROMPT_CONTEXT_PLACEMENT=user_prefix` to put it on the first line of the user's message instead. A small model did worse that way ([docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)), so re-run the eval if you switch.
+In step 4 the context leads the user's message by default. `CHAT_PROMPT_CONTEXT_PLACEMENT=system_message` puts it in its own short system message instead; that scored lower on a 3B model ([docs/chat/PROMPT_V3_LOCAL_EVAL.md](../docs/chat/PROMPT_V3_LOCAL_EVAL.md)) and some chat templates reject a second system message, so re-run the eval if you switch.
 
 ## Turn it on
 

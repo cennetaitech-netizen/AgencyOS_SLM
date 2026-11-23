@@ -30,16 +30,15 @@ def test_prefix_is_identical_for_different_orgs_users_and_days():
     history = [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "answer"}]
     a = build_messages(template, PromptContext("2026-11-23", "Asia/Kolkata", "INR", "planner", "Priya"), history, "q")
     b = build_messages(template, PromptContext("2027-01-05", "Europe/London", "GBP", "org_admin", "Sam"), history, "q")
-    assert a[:-2] == b[:-2]  # system + history: byte-identical
-    assert a[-2] == {
-        "role": "system",
-        "content": "[Context] Today: 2026-11-23 (Asia/Kolkata) · Currency: INR · Role: planner",
+    assert a[:-1] == b[:-1]  # system + history: byte-identical
+    assert a[-1] == {
+        "role": "user",
+        "content": "[Context] Today: 2026-11-23 (Asia/Kolkata) · Currency: INR · Role: planner\n\nq",
     }
-    assert a[-1] == {"role": "user", "content": "q"}
     assert "Priya" not in json.dumps(a)  # names aren't sent at all
-    # for chat templates that allow only one system message, the context can lead the user's message instead
-    c = build_messages(template, PromptContext("2026-11-23", "UTC", "USD", "planner"), history, "q", "user_prefix")
-    assert c[:-1] == a[:-2] and c[-1]["content"].startswith("[Context] Today: 2026-11-23 (UTC)")
+    # optional placement: the context as its own system message before the user's message
+    c = build_messages(template, PromptContext("2026-11-23", "UTC", "USD", "planner"), history, "q", "system_message")
+    assert c[:-2] == a[:-1] and c[-2]["role"] == "system" and c[-1] == {"role": "user", "content": "q"}
 
 
 def test_tool_schemas_are_stable_and_lean():
@@ -67,7 +66,7 @@ async def test_arguments_are_still_validated_against_the_full_schema():
 
 def test_prefix_size_budget():
     """Characters are a stable proxy for tokens here. Measured with a Qwen tokenizer on 2026-11-23: read-only prefix
-    1,336 tokens (was 1,634), with actions 1,712 (was 2,156). Raise these only on purpose."""
+    1,355 tokens (was 1,634), with actions 1,731 (was 2,156). Raise these only on purpose."""
     s = Settings()
     registry = build_registry(s, MockProductAPI())
     read_only = len(load_prompt(s.prompt_version)) + len(json.dumps(registry.schemas(False)))
@@ -85,7 +84,7 @@ def test_training_examples_use_the_serving_layout():
     assert prefix[0] == {"role": "system", "content": template}
     assert prefix[1:3] == history
     assert prefix[3] == {
-        "role": "system",
-        "content": "[Context] Today: 2026-11-23 (Asia/Kolkata) · Currency: INR · Role: member",
+        "role": "user",
+        "content": "[Context] Today: 2026-11-23 (Asia/Kolkata) · Currency: INR · Role: member\n\nHow is cmp_101 doing?",
     }
-    assert prefix[4] == {"role": "user", "content": "How is cmp_101 doing?"}
+    assert len(prefix) == 4

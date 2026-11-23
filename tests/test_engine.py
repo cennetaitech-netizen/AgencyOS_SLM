@@ -73,12 +73,13 @@ async def test_plain_answer_is_charged_and_streamed(engine, settings, clock, pri
     end = events[-1]["data"]
     assert end["tokens_charged"] == end["billable_input_tokens"] + end["billable_output_tokens"] > 0
     assert end["balance_after"] == settings.free_trial_tokens - end["tokens_charged"]
-    system, context, user = model.requests[0]["messages"]
-    # cache-friendly layout: a static system prompt, then a short context message, then the user's own words
+    system, user = model.requests[0]["messages"]
+    # cache-friendly layout: a static system prompt; the context leads the latest user message
     assert "{" not in system["content"] and "2026" not in system["content"] and "Priya" not in system["content"]
-    assert context["role"] == "system"
-    assert context["content"] == "[Context] Today: 2026-11-22 (Asia/Kolkata) · Currency: INR · Role: planner"
-    assert user == {"role": "user", "content": "hi there"}
+    assert user == {
+        "role": "user",
+        "content": "[Context] Today: 2026-11-22 (Asia/Kolkata) · Currency: INR · Role: planner\n\nhi there",
+    }
 
 
 async def test_tool_round_then_answer_records_tool_calls(engine, settings, clock, principal):
@@ -139,8 +140,8 @@ async def test_history_is_included_on_next_turn(engine, settings, clock, princip
     roles = [(m["role"], m["content"]) for m in model.requests[1]["messages"][1:]]
     # history is stored without the context, so the prefix up to the new message is unchanged
     assert roles[:2] == [("user", "first question"), ("assistant", "First answer.")]
-    assert roles[2][0] == "system" and roles[2][1].startswith("[Context] ")
-    assert roles[3] == ("user", "second question")
+    assert roles[2][0] == "user" and roles[2][1].startswith("[Context] ")
+    assert roles[2][1].endswith("\n\nsecond question") and len(roles) == 3
 
 
 # ---------------------------------------------------------------- not charged

@@ -6,12 +6,12 @@ part of a prompt it has seen recently. So the prompt is ordered from most to lea
   1. system prompt: identical for every org, user and day (no placeholders)
   2. tool schemas: identical for every org with the same tools (the chat template puts them next to the system prompt)
   3. conversation history: identical to the previous turn's
-  4. a short ``[Context]`` system message (date, timezone, currency, role), then the latest user message
+  4. the latest user message, starting with a ``[Context]`` line (date, timezone, currency, role)
 
-Only part 4 changes from request to request. The context is never stored in history and never billed. It goes in its
-own system message by default: small models tested on a CPU (see LAUNCH_READINESS.md) answered or repeated it when it
-was inside the user's message. For a model whose chat template rejects a second system message, set
-``CHAT_PROMPT_CONTEXT_PLACEMENT=user_prefix`` to put it on the first line of the user's message instead.
+Only part 4 changes from request to request. The context is never stored in history and never billed. With
+``CHAT_PROMPT_CONTEXT_PLACEMENT=system_message`` it goes in its own short system message before the user's message
+instead; on Qwen2.5-3B that scored lower (docs/chat/PROMPT_V3_LOCAL_EVAL.md), and some chat templates reject a second
+system message, so check with the eval before switching.
 
 Older prompt versions (``system_v1``, ``system_v2``, ``system_ft_v1``) still put the context in the system prompt
 through placeholders; they keep working so a rollback is a config change.
@@ -60,14 +60,14 @@ def build_messages(
     ctx: PromptContext,
     history: list[dict[str, Any]],
     user_text: str,
-    placement: str = "system_message",
+    placement: str = "user_prefix",
 ) -> list[dict[str, Any]]:
     """System prompt + history + context + the latest user message, in cache-friendly order."""
     if is_static(template):
-        if placement == "user_prefix":
-            latest = [{"role": "user", "content": f"{ctx.line()}\n\n{user_text}"}]
-        else:
+        if placement == "system_message":
             latest = [{"role": "system", "content": ctx.line()}, {"role": "user", "content": user_text}]
+        else:
+            latest = [{"role": "user", "content": f"{ctx.line()}\n\n{user_text}"}]
         return [{"role": "system", "content": template}, *history, *latest]
     system = template.format(
         today_date=ctx.today,

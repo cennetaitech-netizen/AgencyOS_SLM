@@ -91,7 +91,7 @@ def prompt_prefix(
     currency: str,
     history: list[dict[str, Any]],
     user_text: str,
-    placement: str = "system_message",
+    placement: str = "user_prefix",
 ) -> list[dict[str, Any]]:
     """System prompt, history and the user's message laid out exactly as the engine sends them
     (engine/prompting.py), with the context as of the message's own date in the org's timezone."""
