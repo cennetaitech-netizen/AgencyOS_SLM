@@ -69,7 +69,7 @@ python -m chat_service.evals.bakeoff --models evals/models.json
 | `chat_service/db/schema.py` | Database schema: the shared contract (M1 + M2 tables) |
 | `chat_service/billing/wallet.py` | Token wallet: free trial, packs, reserve/settle/release, shadow mode, expiry, refunds |
 | `chat_service/billing/tokenizer.py` | Fixed, versioned billable-token counting |
-| `chat_service/billing/payments.py` | Payment provider interface (dev provider; Stripe/Razorpay later) |
+| `chat_service/billing/payments.py` | Payment provider interface: `manual` (invoice and bank transfer, staff confirm; used for launch), `dev` (fake online flow for development); Stripe/Razorpay optional later |
 | `chat_service/engine/agent.py` | Chat engine: gates → reserve → model ⇄ tools loop → settle |
 | `chat_service/actions/` | Chat actions: specs (tiers, preview, undo) and the propose → confirm → execute service |
 | `chat_service/billing/subscriptions.py`, `invoices.py`, `caps.py` | Plans, overage, cycle close, dunning; invoices; caps and alerts |

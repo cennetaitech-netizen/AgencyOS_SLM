@@ -1,11 +1,26 @@
 import { useEffect, useState } from "react";
 import { ApiError, type ChatApiClient } from "../api/client";
 import { BUCKET_LABELS, formatDate, formatMoney, formatTokens } from "../format";
-import type { Cap, Invoice, Pack, Subscription, Wallet } from "../types";
+import type { Cap, Invoice, Pack, PackOrder, Subscription, Wallet } from "../types";
+
+const ORDER_STATUS: Record<PackOrder["status"], string> = {
+  pending: "Awaiting payment",
+  paid: "Paid",
+  failed: "Cancelled",
+  refunded: "Refunded",
+  disputed: "Disputed",
+};
+
+interface ManualOrder {
+  reference: string;
+  amount: string;
+  instructions: string;
+}
 
 export interface BillingPageProps {
   client: ChatApiClient;
-  /** Called with the payment provider's checkout URL; default navigates the browser there. */
+  /** Called with the payment provider's checkout URL; default navigates the browser there. With manual billing
+   *  (no online payments) the page shows the payment instructions and order reference instead. */
   onCheckout?: (url: string) => void;
 }
 
@@ -16,6 +31,8 @@ export function BillingPage({ client, onCheckout = (url) => window.location.assi
   const [sub, setSub] = useState<{ subscription: Subscription | null; capacity_tokens: number } | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [caps, setCaps] = useState<Cap[]>([]);
+  const [orders, setOrders] = useState<PackOrder[]>([]);
+  const [manualOrder, setManualOrder] = useState<ManualOrder | null>(null);
   const [adminOnly, setAdminOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,10 +51,22 @@ export function BillingPage({ client, onCheckout = (url) => window.location.assi
       });
   }, [client]);
 
+  const loadOrders = () => void client.listOrders().then(setOrders).catch(() => undefined);
+  useEffect(loadOrders, [client]);
+
   const buy = async (packId: string) => {
     try {
-      const { checkout_url } = await client.checkout(packId);
-      onCheckout(checkout_url);
+      const r = await client.checkout(packId);
+      if (r.checkout_url) {
+        onCheckout(r.checkout_url);
+        return;
+      }
+      setManualOrder({
+        reference: r.provider_payment_id,
+        amount: r.amount_minor != null && r.currency ? formatMoney(r.amount_minor, r.currency) : "",
+        instructions: r.instructions ?? "",
+      });
+      loadOrders();
     } catch (e) {
       setError(e instanceof ApiError && e.status === 403 ? "Only organisation admins can buy tokens." : "Checkout failed.");
     }
@@ -107,6 +136,41 @@ export function BillingPage({ client, onCheckout = (url) => window.location.assi
               </div>
             ))}
           </div>
+          {manualOrder && (
+            <div className="aos-notice" role="status">
+              <strong>
+                Order {manualOrder.reference}
+                {manualOrder.amount && ` for ${manualOrder.amount}`} placed.
+              </strong>{" "}
+              {manualOrder.instructions}
+            </div>
+          )}
+        </section>
+      )}
+
+      {orders.length > 0 && (
+        <section>
+          <h3>Token orders</h3>
+          <table className="aos-table">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Ordered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.reference}>
+                  <td>{o.reference}</td>
+                  <td>{formatMoney(o.amount_minor, o.currency)}</td>
+                  <td>{ORDER_STATUS[o.status] ?? o.status}</td>
+                  <td>{formatDate(o.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 

@@ -74,8 +74,14 @@ class Settings(BaseSettings):
     auth_provider: Literal["dev", "product"] = "dev"
 
     # Payments (token packs)
-    payment_provider: Literal["dev"] = "dev"  # stripe / razorpay adapters added once finance decides (D9)
-    payment_webhook_secret: str = Field(default="dev-webhook-secret", repr=False)
+    # "manual": no online payments. Pack orders show payment instructions and AgencyOS staff confirm them once the
+    # money arrives; staff also mark invoices paid. Enough to launch; a Stripe/Razorpay adapter can replace it (D9).
+    payment_provider: Literal["dev", "manual"] = "dev"
+    payment_webhook_secret: str = Field(default="dev-webhook-secret", repr=False)  # not used by "manual"
+    manual_payment_instructions: str = (
+        "We'll email you an invoice. Pay by bank transfer and quote the order reference; "
+        "your tokens are added as soon as the payment arrives."
+    )
     app_base_url: str = "http://localhost:3000"
 
     # Subscriptions & invoicing (Phase 10)
@@ -127,8 +133,8 @@ def production_problems(s: Settings) -> list[str]:
     if s.product_adapter != "http":
         problems.append("CHAT_PRODUCT_ADAPTER must be 'http' (the mock product is for development)")
     if s.payment_provider == "dev":
-        problems.append("CHAT_PAYMENT_PROVIDER=dev: configure the real payment provider (decision D9)")
-    if s.payment_webhook_secret in ("", "dev-webhook-secret", "change-me"):
+        problems.append("CHAT_PAYMENT_PROVIDER=dev: use 'manual' (invoice and bank transfer) or a real provider")
+    if s.payment_provider != "manual" and s.payment_webhook_secret in ("", "dev-webhook-secret", "change-me"):
         problems.append("CHAT_PAYMENT_WEBHOOK_SECRET is missing or a default value")
     if not s.billing_tokenizer_path:
         problems.append("CHAT_BILLING_TOKENIZER_PATH must point to the pinned billing tokenizer")

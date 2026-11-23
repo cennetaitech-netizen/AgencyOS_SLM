@@ -50,12 +50,11 @@ def test_production_refuses_unsafe_config():
         create_app(Settings(env="production"))
 
 
-def test_production_config_only_blocked_by_open_decisions():
-    s = Settings(
+def test_fully_configured_production_starts_with_manual_billing():
+    ready = dict(
         env="production",
         auth_provider="product",
         product_adapter="http",
-        payment_webhook_secret="s3cret-xyz",
         billing_tokenizer_path="/srv/tokenizer.json",
         data_encryption_keys=["k"],
         redis_url="redis://r:6379/0",
@@ -63,7 +62,11 @@ def test_production_config_only_blocked_by_open_decisions():
         metrics_token="m-token",
         database_url="postgresql+asyncpg://u:p@db/chat",
     )
-    assert production_problems(s) == ["CHAT_PAYMENT_PROVIDER=dev: configure the real payment provider (decision D9)"]
+    # no online payment provider needed: invoices and bank transfer, confirmed by staff
+    assert production_problems(Settings(**ready, payment_provider="manual")) == []
+    assert production_problems(Settings(**ready, payment_provider="dev", payment_webhook_secret="s3cret-xyz")) == [
+        "CHAT_PAYMENT_PROVIDER=dev: use 'manual' (invoice and bank transfer) or a real provider"
+    ]
 
 
 async def test_security_headers_and_request_id(make_client):

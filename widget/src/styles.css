@@ -160,3 +160,5 @@
 .aos-ok { color: var(--aos-ok); margin: 8px 0 0; }
 .aos-pack.is-current { border-color: var(--aos-accent); }
 .aos-admin .aos-action { max-width: 640px; }
+
+.aos-notice { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--aos-accent); border-radius: 8px; background: color-mix(in srgb, var(--aos-accent) 8%, transparent); font-size: 14px; }

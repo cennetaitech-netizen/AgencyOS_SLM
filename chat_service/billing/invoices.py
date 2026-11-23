@@ -79,6 +79,14 @@ class LogInvoiceSink:
         return f"dev_inv_{invoice.invoice_id.hex[:12]}"
 
 
+class ManualInvoiceSink:
+    """Manual billing: the approved invoice is visible to the client in the billing page and sent from the
+    accounting system by finance; staff mark it paid when the transfer arrives."""
+
+    async def send(self, invoice: InvoiceView) -> str:
+        return f"manual_{invoice.invoice_number or invoice.invoice_id.hex}"
+
+
 def overage_amount_minor(tokens: int, price_per_1m_minor: int) -> int:
     return int((Decimal(tokens) * Decimal(price_per_1m_minor) / Decimal(1_000_000)).quantize(0, ROUND_HALF_UP))
 
@@ -243,6 +251,23 @@ class InvoiceService:
         if row is None:
             raise InvoiceError("unknown invoice")
         return row.org_id
+
+    async def mark_paid_by_id(self, invoice_id: uuid.UUID) -> uuid.UUID:
+        """Manual billing: finance records that a sent invoice was paid. Idempotent for an already paid invoice."""
+        async with self.engine.begin() as conn:
+            inv = (
+                await conn.execute(
+                    select(chat_invoices).where(chat_invoices.c.invoice_id == invoice_id).with_for_update()
+                )
+            ).first()
+            if inv is None:
+                raise InvoiceError("unknown invoice")
+            if inv.status not in ("approved", "sent", "paid"):
+                raise InvoiceError(f"invoice is {inv.status}; only approved or sent invoices can be marked paid")
+            await conn.execute(
+                update(chat_invoices).where(chat_invoices.c.invoice_id == invoice_id).values(status="paid")
+            )
+        return inv.org_id
 
     async def org_for_provider_invoice(self, provider_invoice_id: str) -> uuid.UUID:
         async with self.engine.connect() as conn:

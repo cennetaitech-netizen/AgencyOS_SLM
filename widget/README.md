@@ -12,7 +12,7 @@ React components that embed the assistant in the AgencyOS web app:
   - 👍/👎 feedback with a reason
   - AI disclaimer, starter questions and Stop
   - keyboard and screen-reader support, dark mode, phone layout
-- `BillingPage`: balance by source, token packs (checkout), plan, invoices with usage CSV, and usage limits. Admin-only parts hide for other users.
+- `BillingPage`: balance by source, token packs, plan, invoices with usage CSV, and usage limits. Admin-only parts hide for other users. Buying a pack goes to the payment provider's checkout; with manual billing it shows the payment instructions and order reference instead, and lists the org's orders (awaiting payment, paid, cancelled).
 - `AdminPage`: settings for organisation admins (users without the admin role see a short "admins only" message):
   - **Approvals**: changes waiting for a second approver, with before → after, Approve and apply, or Reject. You can't approve a change you requested or confirmed.
   - **Chat actions**: switch chat actions on or off, budget safety limits (% and amount per action, second-approver threshold, daily limit), which actions are allowed, low-risk confirmation, and roles allowed per risk level.

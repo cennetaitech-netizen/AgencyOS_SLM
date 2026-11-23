@@ -22,8 +22,8 @@ from chat_service.api.auth import AuthProvider, DevAuthProvider, ProductAuthProv
 from chat_service.api.security import SecurityMiddleware
 from chat_service.audit import AuditLog
 from chat_service.billing.caps import CapsService, LogNotifier
-from chat_service.billing.invoices import InvoiceError, InvoiceService, LogInvoiceSink
-from chat_service.billing.payments import DevPaymentProvider, PaymentProvider, WebhookSignatureError
+from chat_service.billing.invoices import InvoiceError, InvoiceService, LogInvoiceSink, ManualInvoiceSink
+from chat_service.billing.payments import PaymentProvider, WebhookSignatureError, build_payment_provider
 from chat_service.billing.subscriptions import SubscriptionService
 from chat_service.billing.tokenizer import build_tokenizer
 from chat_service.billing.wallet import WalletError, WalletService
@@ -69,6 +69,10 @@ class OrgSettingsUpdate(BaseModel):
     model_pin: str | None = Field(default=None, max_length=128)
 
 
+class PaymentNote(BaseModel):
+    note: str = Field(default="", max_length=500)  # e.g. bank transfer reference; kept in the audit log
+
+
 class Goodwill(BaseModel):
     tokens: int = Field(gt=0, le=10_000_000)
     note: str = Field(min_length=3, max_length=500)
@@ -94,7 +98,8 @@ class Services:
         self.auth = auth
         self.payments = payments
         self.notifier = LogNotifier()  # TODO(Phase 6): product email / in-app notifications
-        self.invoices = InvoiceService(db, settings, LogInvoiceSink())  # TODO(D9): provider or accounting sink
+        sink = ManualInvoiceSink() if settings.payment_provider == "manual" else LogInvoiceSink()
+        self.invoices = InvoiceService(db, settings, sink)  # a provider's invoicing replaces the sink (D9)
         self.subscriptions = SubscriptionService(db, settings, self.wallet, self.invoices)
         self.caps = CapsService(db, self.notifier, settings.alert_thresholds)
         self.actions = ActionService(db, settings, self.product_api, orgs=self.orgs, notifier=self.notifier)
@@ -174,7 +179,7 @@ def create_app(
             model or _default_model(settings, engine),
             product_api,
             auth or _default_auth(settings),
-            payments or DevPaymentProvider(settings.payment_webhook_secret),
+            payments or build_payment_provider(settings),
         )
         yield
         if owns_db:
@@ -468,7 +473,14 @@ def create_app(
         await svc.wallet.create_pending_payment(
             p.org_id, pack.pack_id, svc.payments.name, co.provider_payment_id, p.user_id
         )
-        return {"checkout_url": co.checkout_url, "provider_payment_id": co.provider_payment_id}
+        return {
+            "checkout_url": co.checkout_url,
+            "provider_payment_id": co.provider_payment_id,
+            "manual": co.checkout_url is None,
+            "instructions": co.instructions,
+            "amount_minor": pack.price_minor,
+            "currency": pack.currency,
+        }
 
     @app.post("/chat/billing/webhook", status_code=204)
     async def webhook(request: Request, svc: Services = Depends(services)) -> None:
@@ -491,6 +503,91 @@ def create_app(
                 await svc.subscriptions.payment_failed(org_id)
         except (WalletError, InvoiceError) as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/chat/billing/orders")
+    async def billing_orders(p: Principal = Depends(require_role("org_admin_role")), svc: Services = Depends(services)):
+        """This org's token pack orders (pending ones await payment under manual billing)."""
+        return {"orders": await svc.wallet.list_payments(p.org_id, limit=20)}
+
+    # ------------------------------------------------------------------ manual billing (AgencyOS staff)
+
+    @app.get("/chat/admin/payments")
+    async def admin_payments(
+        status: str | None = Query("pending", pattern="^(pending|paid|refunded|disputed|failed)$"),
+        p: Principal = Depends(require_role("staff_role")),
+        svc: Services = Depends(services),
+    ):
+        return {"payments": await svc.wallet.list_payments(None, status)}
+
+    @app.post("/chat/admin/payments/{reference}/confirm", dependencies=[audited("manual_payment_confirmed", "global")])
+    async def admin_confirm_payment(
+        reference: str,
+        body: PaymentNote | None = None,
+        p: Principal = Depends(require_role("staff_role")),
+        svc: Services = Depends(services),
+    ):
+        """The money for a manual order arrived: credit the pack (once, even if confirmed twice)."""
+        provider = await svc.wallet.payment_provider_of(reference)
+        if provider is None:
+            raise HTTPException(404, "unknown order reference")
+        if provider != "manual":
+            raise HTTPException(409, "this order is paid through the payment provider, not confirmed by hand")
+        try:
+            bucket_id = await svc.wallet.credit_purchase(reference)
+        except WalletError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        await svc.analytics.track("pack_purchased", None, p.user_id, {"provider_payment_id": reference})
+        return {"reference": reference, "status": "paid", "bucket_id": str(bucket_id)}
+
+    @app.post(
+        "/chat/admin/payments/{reference}/cancel",
+        status_code=204,
+        dependencies=[audited("manual_payment_cancelled", "global")],
+    )
+    async def admin_cancel_payment(
+        reference: str,
+        body: PaymentNote | None = None,
+        p: Principal = Depends(require_role("staff_role")),
+        svc: Services = Depends(services),
+    ) -> None:
+        try:
+            await svc.wallet.cancel_pending_payment(reference)
+        except WalletError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/chat/admin/invoices/{invoice_id}/mark-paid", dependencies=[audited("invoice_marked_paid", "global")])
+    async def admin_invoice_paid(
+        invoice_id: uuid.UUID,
+        body: PaymentNote | None = None,
+        p: Principal = Depends(require_role("staff_role")),
+        svc: Services = Depends(services),
+    ):
+        """Manual billing: the invoice was paid (e.g. bank transfer). Lifts past-due or suspended status."""
+        try:
+            org_id = await svc.invoices.mark_paid_by_id(invoice_id)
+        except InvoiceError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        await svc.subscriptions.payment_succeeded(org_id)
+        return {"invoice_id": str(invoice_id), "status": "paid"}
+
+    @app.post(
+        "/chat/admin/invoices/{invoice_id}/mark-unpaid",
+        dependencies=[audited("invoice_marked_unpaid", "global")],
+    )
+    async def admin_invoice_unpaid(
+        invoice_id: uuid.UUID,
+        body: PaymentNote | None = None,
+        p: Principal = Depends(require_role("staff_role")),
+        svc: Services = Depends(services),
+    ):
+        """Manual billing: the invoice is overdue. The org goes past due; dunning suspends it after the grace
+        period (CHAT_DUNNING_GRACE_DAYS) unless it's marked paid first."""
+        try:
+            org_id = await svc.invoices.org_of(invoice_id)
+        except InvoiceError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        await svc.subscriptions.payment_failed(org_id)
+        return {"invoice_id": str(invoice_id), "subscription": "past_due"}
 
     # ------------------------------------------------------------------ internal admin (AgencyOS staff)
 

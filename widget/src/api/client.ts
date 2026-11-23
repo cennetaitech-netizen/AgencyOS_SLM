@@ -12,9 +12,11 @@ import type {
   Plan,
   ActionView,
   Cap,
+  CheckoutResult,
   Conversation,
   Invoice,
   Pack,
+  PackOrder,
   StoredMessage,
   StreamEvent,
   Subscription,
@@ -126,7 +128,11 @@ export class ChatApiClient {
     return this.request<{ packs: Pack[] }>("GET", "/chat/packs").then((r) => r.packs);
   }
   checkout(packId: string) {
-    return this.request<{ checkout_url: string }>("POST", "/chat/billing/checkout", { pack_id: packId });
+    return this.request<CheckoutResult>("POST", "/chat/billing/checkout", { pack_id: packId });
+  }
+  /** This org's token pack orders (org admins). */
+  listOrders() {
+    return this.request<{ orders: PackOrder[] }>("GET", "/chat/billing/orders").then((r) => r.orders);
   }
   getSubscription() {
     return this.request<{ subscription: Subscription | null; capacity_tokens: number }>(

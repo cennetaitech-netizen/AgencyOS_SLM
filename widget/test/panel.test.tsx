@@ -196,6 +196,35 @@ describe("BillingPage", () => {
     await waitFor(() => expect(onCheckout).toHaveBeenCalledWith("https://pay.example/checkout/1"));
   });
 
+  it("shows payment instructions and the order instead of a checkout page with manual billing", async () => {
+    const onCheckout = vi.fn();
+    let ordered = false;
+    const order = { reference: "AOS-1A2B3C4D5E", pack_id: "p1m", provider: "manual", amount_minor: 99900, currency: "INR", status: "pending", created_at: "2026-11-23T10:00:00Z" };
+    const { client } = fakeApi({
+      "GET /chat/wallet": WALLET,
+      "GET /chat/packs": { packs: [{ pack_id: "p1m", tokens: 1000000, price_minor: 99900, currency: "INR", validity_days: 365 }] },
+      "GET /chat/billing/subscription": { subscription: null, capacity_tokens: 0 },
+      "GET /chat/billing/invoices": { invoices: [] },
+      "GET /chat/caps": { caps: [] },
+      "GET /chat/billing/orders": () => ({ orders: ordered ? [order] : [] }),
+      "POST /chat/billing/checkout": () => {
+        ordered = true;
+        return {
+          checkout_url: null, provider_payment_id: "AOS-1A2B3C4D5E", manual: true, amount_minor: 99900, currency: "INR",
+          instructions: "We'll email you an invoice. Pay by bank transfer and quote the order reference.",
+        };
+      },
+    });
+    render(<BillingPage client={client} onCheckout={onCheckout} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Buy" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Order AOS-1A2B3C4D5E for ₹999.00 placed.");
+    expect(notice).toHaveTextContent("Pay by bank transfer");
+    expect(onCheckout).not.toHaveBeenCalled();
+    const row = (await screen.findByRole("cell", { name: "AOS-1A2B3C4D5E" })).closest("tr")!;
+    expect(row).toHaveTextContent("Awaiting payment");
+  });
+
   it("hides plan details from non-admins", async () => {
     const { client } = fakeApi({
       "GET /chat/wallet": WALLET,

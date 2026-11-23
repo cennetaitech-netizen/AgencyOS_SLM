@@ -119,6 +119,26 @@ export interface Pack {
   validity_days: number;
 }
 
+export interface CheckoutResult {
+  /** Payment provider's page; null with manual billing (pay by invoice / bank transfer instead). */
+  checkout_url: string | null;
+  provider_payment_id: string;
+  manual?: boolean;
+  instructions?: string | null;
+  amount_minor?: number;
+  currency?: string;
+}
+
+export interface PackOrder {
+  reference: string;
+  pack_id: string;
+  provider: string;
+  amount_minor: number;
+  currency: string;
+  status: "pending" | "paid" | "refunded" | "disputed" | "failed";
+  created_at: string;
+}
+
 export interface Invoice {
   invoice_id: string;
   invoice_number: string | null;

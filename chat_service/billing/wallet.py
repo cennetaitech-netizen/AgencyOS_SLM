@@ -296,6 +296,47 @@ class WalletService:
             await conn.execute(update(chat_payments).where(chat_payments.c.id == payment.id).values(status="paid"))
             return bucket_id
 
+    async def list_payments(
+        self, org_id: uuid.UUID | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        """Pack orders, newest first (all orgs when ``org_id`` is None: staff view)."""
+        q = select(
+            chat_payments.c.provider_payment_id.label("reference"),
+            chat_payments.c.org_id,
+            chat_payments.c.provider,
+            chat_payments.c.pack_id,
+            chat_payments.c.amount_minor,
+            chat_payments.c.currency,
+            chat_payments.c.status,
+            chat_payments.c.created_at,
+        ).order_by(chat_payments.c.created_at.desc())
+        if org_id is not None:
+            q = q.where(chat_payments.c.org_id == org_id)
+        if status is not None:
+            q = q.where(chat_payments.c.status == status)
+        async with self.engine.connect() as conn:
+            rows = (await conn.execute(q.limit(limit))).all()
+        return [dict(r._mapping) | {"org_id": str(r.org_id)} for r in rows]
+
+    async def payment_provider_of(self, provider_payment_id: str) -> str | None:
+        async with self.engine.connect() as conn:
+            return (
+                await conn.execute(
+                    select(chat_payments.c.provider).where(chat_payments.c.provider_payment_id == provider_payment_id)
+                )
+            ).scalar_one_or_none()
+
+    async def cancel_pending_payment(self, provider_payment_id: str) -> None:
+        """An order that won't be paid (manual billing). Only pending orders can be cancelled."""
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(chat_payments)
+                .where(chat_payments.c.provider_payment_id == provider_payment_id, chat_payments.c.status == "pending")
+                .values(status="failed")
+            )
+        if result.rowcount != 1:
+            raise WalletError("no pending order with that reference")
+
     async def reverse_purchase(self, provider_payment_id: str, new_status: str = "refunded") -> ReverseResult:
         """Refund/chargeback: remove the pack's remaining tokens without ever going negative.
 

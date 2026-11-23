@@ -6,7 +6,7 @@ Status as of 2026-11-22. ✅ = done and verified · 🟡 = built, needs a real e
 
 | Item | Status | Evidence |
 |---|---|---|
-| **Production safety guard**: the service refuses to start with dev login, mock product, dev payments, default webhook secret, no billing tokenizer, no encryption key, no Redis, no CORS allow-list, no metrics token, or the local database | ✅ | `config.production_problems`, tests in `tests/test_hardening.py`. Today only "real payment provider (D9)" stands between a fully configured deployment and start-up |
+| **Production safety guard**: the service refuses to start with dev login, mock product, dev payments, default webhook secret, no billing tokenizer, no encryption key, no Redis, no CORS allow-list, no metrics token, or the local database | ✅ | `config.production_problems`, tests in `tests/test_hardening.py`. A fully configured deployment now starts with `CHAT_PAYMENT_PROVIDER=manual`; no online payment provider is needed |
 | Security headers, request IDs, 413 for oversized requests, CORS allow-list, API docs off in production | ✅ | `chat_service/api/security.py`, tests |
 | Audit log of staff and org-admin changes (who, what, when, request ID); staff-only viewer | ✅ | `chat_audit_log` (migration 0004), `GET /chat/admin/audit` |
 | Encryption at rest for stored tool results (client campaign data), with key rotation | ✅ | `chat_service/crypto.py`; tests: data unreadable in the DB, rotation, old key retired |
@@ -19,7 +19,8 @@ Status as of 2026-11-22. ✅ = done and verified · 🟡 = built, needs a real e
 | Failure drill (model errors + Redis outage under load) | ✅ | §3, including one finding fixed |
 | Container image and local full stack | ✅ | `.github/workflows/container.yml` on every relevant push. It builds the image, checks it runs as non-root and refuses an unsafe production config, starts the whole compose stack with monitoring, and runs `ops/smoke_stack.py` (API, a streamed chat message, metrics summed across the 4 workers, Prometheus with the alert rules, Grafana with the dashboard). It also scans the image: 0 fixable critical vulnerabilities. The first runs found and fixed two bugs: per-worker metrics, and a model host unreachable inside compose |
 | **External penetration test** | 🟡 | Scope in §5. Needs a vendor (book for weeks 9–10) |
-| **One full real billing cycle** with pilot orgs, reconciled with zero discrepancies | 🟡 | Mechanism and reconciliation built and tested; needs real pilot orgs and the payment provider |
+| **Manual billing** (launch without an online payment provider) | ✅ | Pack orders show payment instructions and a reference. Staff confirm the order when the money arrives, which credits tokens exactly once, and mark invoices paid or overdue. `tests/test_manual_billing.py`; runbook below |
+| **One full real billing cycle** with pilot orgs, reconciled with zero discrepancies | 🟡 | Mechanism and reconciliation built and tested; needs real pilot orgs (manual billing is enough) |
 | Status page, on-call rotation, alert routing (PagerDuty/Opsgenie) | 🟡 | Rules and runbooks ready; tooling and people to assign |
 | Dashboard | ✅ | `ops/grafana/` (Grafana, provisioned), §2. Every query run against live data from a load run with injected failures |
 | Go/no-go meeting | ❌ | `docs/business/GOVERNANCE_AND_PRICING.md` §2 (decision D12) |
@@ -115,6 +116,12 @@ Setup: 2 API instances sharing Postgres 16 and Redis; stand-in model host (`ops/
 2. If the hit rate is fine, check `GET /chat/admin/economics` by org (long conversations, heavy tool results).
 3. Levers: lower `CHAT_TOOL_RESULT_MAX_CHARS` or `CHAT_HISTORY_TURNS`, a shorter prompt, or the fine-tuned model with `system_ft_v2` (Phase 11). See [ops/MODEL_HOST.md](../ops/MODEL_HOST.md).
 
+**Manual billing (finance, staff role):**
+- Pending token orders: `GET /chat/admin/payments`. The client sees the reference, e.g. `AOS-1A2B3C4D5E`, and quotes it on the bank transfer.
+- Money arrived: `POST /chat/admin/payments/{reference}/confirm` with `{"note": "bank ref"}`. Tokens are credited once, even if confirmed twice. Order won't be paid: `POST /chat/admin/payments/{reference}/cancel`.
+- Subscription invoices: approve (`POST /chat/admin/invoices/{id}/approve`), then send it from the accounting system. When it's paid: `POST /chat/admin/invoices/{id}/mark-paid`, which also lifts past-due or suspended status. If it's overdue: `POST /chat/admin/invoices/{id}/mark-unpaid`; the org goes past due and is suspended after `CHAT_DUNNING_GRACE_DAYS` unless paid.
+- Every one of these is in the audit log (`GET /chat/admin/audit`).
+
 **Other routine operations** (also in `docs/business/SUPPORT_PILOT_LAUNCH_KIT.md`): goodwill credit, disabling chat for one org, pinning an org to a model, invoice approval, key rotation (`python -m chat_service.crypto rotate`).
 
 **Game day (before go-live, then quarterly):**
@@ -137,7 +144,7 @@ Setup: 2 API instances sharing Postgres 16 and Redis; stand-in model host (`ops/
 Load balancer (TLS, `/readyz` health check, idle timeout above the longest reply, no response buffering on the stream route) → **2+ API containers** (4 workers each; the image sets `PROMETHEUS_MULTIPROC_DIR` so `/metrics` sums all workers. Set it yourself if you run uvicorn with `--workers` outside the image) → Postgres (managed, point-in-time recovery, daily backup restore test) · Redis (managed or container, **no persistence**) · 1 **jobs** container (`python -m chat_service.jobs`, single replica) · model host (managed or vLLM, **prefix caching on**, see `ops/MODEL_HOST.md`) + fallback host · Prometheus + alerting. Secrets (DB URL, model and payment keys, webhook secret, encryption keys, metrics token) come from the secrets manager.
 
 ## 7. What still needs people before launch
-1. Payment provider and invoicing route (D9): the last item blocking production start-up.
+1. Optional: an online payment provider (D9). Launch runs on manual billing; Stripe or Razorpay can be added later behind the same interface.
 2. Pen-test vendor booked; findings fixed.
 3. On-call rotation, alert routing, status page. Point the dashboard at the production Prometheus.
 4. Staging environment with the real product API and model host; load test and `ops/smoke_stack.py` re-run there (the container build is verified in CI).
